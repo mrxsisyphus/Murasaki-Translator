@@ -78,7 +78,7 @@ Murasaki 模型针对术语表进行了特化训练，支持 **Prompt 级术语�
 > 本项目内置的推理核心基于 **CUDA 12.4** 编译，对显卡驱动有以下硬性要求：
 > - **无需安装 CUDA Toolkit**：普通用户**不需要**下载安装庞大的 CUDA 开发包。
 > - **必须更新驱动**：您的 NVIDIA 显卡驱动必须支持 CUDA 12.4 或更高版本。请确保驱动版本 **≥ 551.61**（即 2024 年初及之后的版本）。
-> - **典型故障**：若驱动版本过旧（如仅支持 CUDA 11.x），程序启动时将无法加载 `ggml-cuda.dll` 导致直接崩溃或无响应。遇到此类问题请优先前往 NVIDIA 官网或使用 GeForce Experience 更新驱动。
+> - **典型故障**：若驱动版本过旧（如仅支持 CUDA 11.x），加载模型翻译时将无法加载 `ggml-cuda.dll` 导致程序异常。遇到此类问题请优先前往 NVIDIA 官网或使用 GeForce Experience 更新驱动。
    
 2. **获取模型**: 
    前往 [Hugging Face](https://huggingface.co/Murasaki-Project) 下载 `Murasaki-GGUF` 模型文件。
