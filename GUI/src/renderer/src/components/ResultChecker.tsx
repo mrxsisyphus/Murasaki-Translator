@@ -398,7 +398,7 @@ export function ResultChecker({
 
     if (!displayData) {
         return (
-            <div className="flex-1 flex flex-col p-6 overflow-hidden">
+            <div className="flex-1 flex flex-col p-6 overflow-hidden h-full">
                 <Card className="flex-1 flex items-center justify-center">
                     <div className="text-center text-muted-foreground flex flex-col items-center gap-4">
                         <div>
@@ -417,7 +417,7 @@ export function ResultChecker({
     }
 
     return (
-        <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3">
+        <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3 h-full">
             {/* Header with Path if available */}
             {localCachePath && (
                 <div className="text-xs text-muted-foreground break-all px-1">
@@ -504,7 +504,7 @@ export function ResultChecker({
             </div>
 
             {/* 问题列表 */}
-            <Card className="flex-1 overflow-hidden">
+            <Card className="flex-1 overflow-hidden flex flex-col">
                 <CardHeader className="py-3 border-b border-border">
                     <CardTitle className="text-sm font-medium">
                         检测结果 ({filteredIssues.length})

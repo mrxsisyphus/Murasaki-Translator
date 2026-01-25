@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Save, Settings, Trash2, AlertTriangle, Download, FolderOpen, XCircle, Github, Globe, ExternalLink } from "lucide-react"
+import { Save, Settings, Trash2, AlertTriangle, Download, FolderOpen, XCircle, Github, Globe, ExternalLink, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/core"
 import { Button, Switch } from "./ui/core"
 import { AlertModal } from "./ui/AlertModal"
@@ -19,6 +19,10 @@ export function SettingsView({ lang }: { lang: Language }) {
 
     const [saved, setSaved] = useState(false)
 
+    // Update States
+    const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'found' | 'none' | 'error'>('idle')
+    const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string, releaseNotes: string, url: string, error?: string } | null>(null)
+
     useEffect(() => {
         setOutputDir(localStorage.getItem("config_output_dir") || "")
         setAutoTxt(localStorage.getItem("config_auto_txt") === "true")
@@ -26,6 +30,44 @@ export function SettingsView({ lang }: { lang: Language }) {
         setTraditional(localStorage.getItem("config_traditional") === "true")
         setCacheDir(localStorage.getItem("config_cache_dir") || "")
     }, [])
+
+    const checkUpdates = async () => {
+        setUpdateStatus('checking')
+        try {
+            // @ts-ignore
+            const res = await window.api.checkUpdate()
+            if (res.success) {
+                // Robust version comparison helper
+                const parseVersion = (v: string) => v.replace(/^v/, '').split('.').map(n => parseInt(n) || 0)
+                const current = parseVersion(APP_CONFIG.version)
+                const latest = parseVersion(res.latestVersion)
+
+                let isNewer = false
+                for (let i = 0; i < Math.max(current.length, latest.length); i++) {
+                    const l = latest[i] || 0
+                    const c = current[i] || 0
+                    if (l > c) { isNewer = true; break }
+                    if (l < c) { isNewer = false; break }
+                }
+
+                if (isNewer) {
+                    setUpdateStatus('found')
+                    setUpdateInfo(res)
+                } else {
+                    setUpdateStatus('none')
+                }
+            } else {
+                setUpdateStatus('error')
+                const errorMsg = res.error?.includes('timeout') || res.error?.includes('ECONN')
+                    ? `${res.error} (请尝试开启代理)`
+                    : res.error
+                setUpdateInfo({ latestVersion: '', releaseNotes: '', url: '', error: errorMsg })
+            }
+        } catch (e) {
+            setUpdateStatus('error')
+            setUpdateInfo({ latestVersion: '', releaseNotes: '', url: '', error: String(e) })
+        }
+    }
 
     const handleSelectDir = async () => {
         // @ts-ignore
@@ -299,6 +341,75 @@ export function SettingsView({ lang }: { lang: Language }) {
                     </Card>
                 </div>
 
+                {/* Update Settings */}
+                <div className="pt-6">
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2 mb-3 px-1">
+                        <RefreshCw className="w-4 h-4 text-primary" />
+                        软件更新
+                    </h3>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-base">版本自检</CardTitle>
+                            <span className="text-xs text-muted-foreground font-mono">v{APP_CONFIG.version}</span>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <p className="text-sm font-medium">
+                                        {updateStatus === 'idle' && "检查最新的 Release"}
+                                        {updateStatus === 'checking' && "正在连接 GitHub..."}
+                                        {updateStatus === 'found' && (
+                                            <span className="text-green-600 dark:text-green-400 font-bold">
+                                                发现新版本: v{updateInfo?.latestVersion}
+                                            </span>
+                                        )}
+                                        {updateStatus === 'none' && "已是最新版本"}
+                                        {updateStatus === 'error' && <span className="text-red-500">连接失败: {updateInfo?.error}</span>}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        定期检查更新以获取最新的功能和模型优化
+                                    </p>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={checkUpdates}
+                                    disabled={updateStatus === 'checking'}
+                                    className="gap-2"
+                                >
+                                    <RefreshCw className={`w-3.5 h-3.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
+                                    {updateStatus === 'found' ? "重新检查" : "检查更新"}
+                                </Button>
+                            </div>
+
+                            {updateStatus === 'found' && updateInfo && (
+                                <div className="p-3 rounded-lg bg-secondary/50 border space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <div className="space-y-1">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-bold uppercase text-muted-foreground">更新日志</span>
+                                            <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">New</span>
+                                        </div>
+                                        <div className="text-xs text-foreground/80 max-h-32 overflow-y-auto font-sans whitespace-pre-wrap leading-relaxed">
+                                            {updateInfo.releaseNotes || "无更新说明"}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            className="flex-1 gap-2"
+                                            onClick={() => window.api?.openExternal(updateInfo.url)}
+                                        >
+                                            <Globe className="w-3.5 h-3.5" />
+                                            前往 GitHub 下载官方安装包
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
+
                 {/* Danger Zone */}
                 <div className="pt-6">
                     <h3 className="text-sm font-bold text-red-500 dark:text-red-400 flex items-center gap-2 mb-3 px-1">
@@ -353,7 +464,7 @@ export function SettingsView({ lang }: { lang: Language }) {
                             {/* GitHub Card */}
                             <div
                                 className="flex flex-col gap-1 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-background hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-all cursor-pointer group"
-                                onClick={() => window.open(APP_CONFIG.officialRepo, '_blank')}
+                                onClick={() => window.api?.openExternal(APP_CONFIG.officialRepo)}
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <Github className="w-5 h-5 text-zinc-700 dark:text-zinc-300" />
@@ -368,7 +479,7 @@ export function SettingsView({ lang }: { lang: Language }) {
                             {/* HuggingFace Card */}
                             <div
                                 className="flex flex-col gap-1 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-background hover:bg-yellow-50/50 dark:hover:bg-yellow-900/10 transition-all cursor-pointer group"
-                                onClick={() => window.open(APP_CONFIG.modelDownload.huggingface, '_blank')}
+                                onClick={() => window.api?.openExternal(APP_CONFIG.modelDownload.huggingface)}
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-lg">🤗</span>

@@ -47,8 +47,14 @@ const api = {
     serverLogs: () => ipcRenderer.invoke('server-logs'),
     serverWarmup: () => ipcRenderer.invoke('server-warmup'),
 
+    // Update System
+    checkUpdate: () => ipcRenderer.invoke('check-update'),
+
     // Theme Sync (for Windows title bar)
     setTheme: (theme: 'dark' | 'light') => ipcRenderer.send('set-theme', theme),
+
+    // External Links
+    openExternal: (url: string) => ipcRenderer.send('open-external', url),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -131,9 +131,13 @@ export interface ElectronAPI {
     serverLogs: () => Promise<string[]>
     serverWarmup: () => Promise<WarmupResult>
 
+    // Update
+    checkUpdate: () => Promise<any>
+
     // System
     showNotification: (title: string, body: string) => void
     setTheme: (theme: 'dark' | 'light') => void
+    openExternal: (url: string) => void
     getHardwareInfo: () => Promise<{
         cpuUsage: number
         memUsage: number

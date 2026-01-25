@@ -7,7 +7,7 @@
 export const APP_CONFIG = {
     // Application Info
     name: 'Murasaki Translator',
-    version: '1.0.0',
+    version: '1.0.1',
 
     // Official Links
     officialRepo: 'https://github.com/soundstarrain/Murasaki-Translator',

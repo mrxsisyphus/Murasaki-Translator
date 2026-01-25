@@ -42,3 +42,14 @@ python_env/
 
 # External Binaries (Do not commit large runtime binaries)
 llama-b7770-*/
+
+# Murasaki Translation Temp Files
+*.bak
+*.pause
+*.log
+GUI/release/
+GUI/dist-native/
+.DS_Store
+dev_start.bat
+changelog.private
+*.diff

@@ -14,7 +14,6 @@ import {
     Filter,
     Check,
     Book,
-    List,
     AlertTriangle,
     X,
     ChevronLeft,
@@ -1023,7 +1022,7 @@ export default function ProofreadView({ }: ProofreadViewProps) {
                             <X className="w-4 h-4" />
                         </Button>
                     </div>
-                    <div className="flex-1 overflow-hidden">
+                    <div className="flex-1 min-h-0 overflow-hidden">
                         <ResultChecker
                             lang={language}
                             cacheData={cacheData}

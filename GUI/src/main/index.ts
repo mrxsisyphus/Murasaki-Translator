@@ -453,6 +453,56 @@ ipcMain.handle('select-folder-files', async () => {
     return files
 })
 
+// --- Update System IPC ---
+ipcMain.handle('check-update', async () => {
+    try {
+        const repo = 'soundstarrain/Murasaki-Translator'
+        const url = `https://api.github.com/repos/${repo}/releases/latest`
+
+        const fetch = (url: string) => new Promise<string>((resolve, reject) => {
+            const https = require('https')
+            const options = {
+                headers: { 'User-Agent': 'Murasaki-Translator' }
+            }
+            https.get(url, options, (res: any) => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`GitHub API returned status ${res.statusCode}`))
+                    return
+                }
+                let data = ''
+                res.on('data', (chunk: any) => data += chunk)
+                res.on('end', () => resolve(data))
+            }).on('error', reject)
+        })
+
+        const resBody = await fetch(url)
+        const data = JSON.parse(resBody)
+
+        return {
+            success: true,
+            currentVersion: app.getVersion(),
+            latestVersion: data.tag_name?.replace('v', ''),
+            releaseNotes: data.body,
+            url: data.html_url
+        }
+    } catch (e) {
+        console.error('[Update Check] Failed:', e)
+        return { success: false, error: String(e) }
+    }
+})
+// --------------------------
+
+// Open External link in system browser
+ipcMain.on('open-external', (_event, url: string) => {
+    const { shell } = require('electron')
+    // Security validation: Only allow http and https protocols
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+        shell.openExternal(url).catch((e: Error) => console.error('[Shell] Failed to open external URL:', e))
+    } else {
+        console.warn('Blocked invalid or potentially dangerous external URL:', url)
+    }
+})
+
 // Desktop Notification
 ipcMain.on('show-notification', (_event, { title, body }) => {
     new Notification({ title, body }).show()
