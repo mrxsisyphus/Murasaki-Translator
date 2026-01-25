@@ -157,6 +157,8 @@ export const translations = {
                 title: '尚未添加任何规则',
                 desc: '点击「添加规则」或使用「预设模板」快速开始'
             },
+            resetTitle: '重置处理规则',
+            resetConfirm: '确定要重置当前的处理规则吗？这将应用本模式的推荐預设，现有自定义规则将被覆盖。',
             presetNames: {
                 pre_clean: '轻小说标准 (去空行、双换行)',
                 pre_normalize: '规范化 (统一引号、全角转半角)',
@@ -712,6 +714,8 @@ export const translations = {
                 title: 'No rules added yet',
                 desc: 'Click "Add Rule" or "Presets" to get started'
             },
+            resetTitle: 'Reset Processing Rules',
+            resetConfirm: 'Are you sure you want to reset the current processing rules? This will apply the recommended presets for this mode, and existing custom rules will be overwritten.',
             presetNames: {
                 pre_clean: 'LN Standard (Clean Empty, Double Newline)',
                 pre_normalize: 'Normalize (Quotes, Full/Half Punct)',
@@ -1267,6 +1271,8 @@ export const translations = {
                 title: 'ルールがまだありません',
                 desc: '「ルール追加」または「プリセット」をクリックして開始'
             },
+            resetTitle: 'ルールをリセット',
+            resetConfirm: '現在の処理ルールをリセットしてもよろしいですか？推奨されるデフォルトプリセットが適用され、現在のカスタムルールは上書きされます。',
             presetNames: {
                 pre_clean: 'ラノベ標準 (空行削除、二重改行)',
                 pre_normalize: '標準化 (引用符、全半角)',

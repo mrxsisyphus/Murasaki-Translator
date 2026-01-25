@@ -170,13 +170,26 @@ class RuleProcessor:
             return "\n".join(lines)
             
         elif format_name == 'smart_quotes':
-            # Normalize fancy quotes to standard ASCII
-            table = {
-                '"': '"', '"': '"', 
-                ''': "'", ''': "'"
-            }
-            for k, v in table.items():
-                text = text.replace(k, v)
+            # Convert CJK/English quotes to Corner Quotes
+            # 1. Handle explicit directional quotes
+            text = text.replace('“', '「').replace('”', '」').replace('‘', '『').replace('’', '』')
+            
+            # 2. Robust pairing for straight quotes (" and ') - Balanced check within each line
+            lines = []
+            for line in text.splitlines():
+                # Only pair if count is even to avoid misalignment in lines with odd quotes
+                if line.count('"') > 0 and line.count('"') % 2 == 0:
+                    line = re.sub(r'"([^"]*)"', r'「\1」', line)
+                if line.count("'") > 0 and line.count("'") % 2 == 0:
+                    line = re.sub(r"'([^']*)'", r'『\1』', line)
+                lines.append(line)
+            return "\n".join(lines)
+            
+        elif format_name == 'ellipsis':
+            # Standardize ellipsis formats to ……
+            # Only handle 3 or more characters to avoid false positives with double periods
+            text = re.sub(r'\.{3,}', '……', text)
+            text = re.sub(r'。{3,}', '……', text)
             return text
             
         elif format_name == 'full_to_half_punct':

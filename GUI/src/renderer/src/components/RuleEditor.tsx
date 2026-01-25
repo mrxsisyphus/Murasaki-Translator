@@ -22,8 +22,12 @@ interface RuleEditorProps {
     mode: 'pre' | 'post'
 }
 
-// Preset Templates - 优化后的预设模板
-// 注意：pre_clean 的 clean_empty 和 ensure_double_newline 是冲突的，已修复
+// Default Rules for Post-processing (Initial & Reset)
+const DEFAULT_POST_RULES: Rule[] = [
+    { id: 'o1', type: 'format', active: true, pattern: 'ensure_double_newline', replacement: '', label: '强制双换行 (轻小说)' },
+    { id: 'o2', type: 'format', active: true, pattern: 'smart_quotes', replacement: '', label: '统一引号格式' }
+]
+
 const PRESET_TEMPLATES: { [key: string]: Rule[] } = {
     // 预处理 - 轻小说清理（不删空行，保留段落间距）
     pre_novel: [
@@ -35,15 +39,12 @@ const PRESET_TEMPLATES: { [key: string]: Rule[] } = {
         { id: 'p3', type: 'format', active: true, pattern: 'smart_quotes', replacement: '', label: '统一引号格式' },
     ],
     // 后处理 - 轻小说格式（双换行，标点修正）
-    post_novel: [
-        { id: 'o1', type: 'format', active: true, pattern: 'ensure_double_newline', replacement: '', label: '强制双换行 (轻小说)' },
-        { id: 'o2', type: 'replace', active: true, pattern: '...', replacement: '……', label: '规范省略号' },
-    ],
+    post_novel: DEFAULT_POST_RULES,
     // 后处理 - 通用格式（单换行，紧凑格式）
     post_general: [
         { id: 'o3', type: 'format', active: true, pattern: 'clean_empty', replacement: '', label: '移除空行' },
         { id: 'o4', type: 'format', active: true, pattern: 'ensure_single_newline', replacement: '', label: '强制单换行' },
-        { id: 'o5', type: 'replace', active: true, pattern: '...', replacement: '……', label: '规范省略号' },
+        { id: 'o5', type: 'format', active: true, pattern: 'smart_quotes', replacement: '', label: '统一引号格式' }
     ]
 }
 
@@ -63,18 +64,9 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
         if (savedRules) {
             try { setRules(JSON.parse(savedRules)) } catch (e) { console.error(e) }
         } else if (mode === 'post') {
-            // Default rule for post-processing: Double Newline (Light Novel format)
-            const defaultPostRule: Rule = {
-                id: 'default_double_newline',
-                type: 'format',
-                active: true,
-                pattern: 'ensure_double_newline',
-                replacement: '',
-                label: '强制双换行 (轻小说)'
-            }
-            setRules([defaultPostRule])
+            setRules(DEFAULT_POST_RULES)
             // Also save to localStorage so Dashboard can read it immediately
-            localStorage.setItem(storageKey, JSON.stringify([defaultPostRule]))
+            localStorage.setItem(storageKey, JSON.stringify(DEFAULT_POST_RULES))
         }
     }, [mode])
 
@@ -95,8 +87,8 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
 
     const handleReset = () => {
         showConfirm({
-            title: t.resetSystem,
-            description: t.resetConfirm,
+            title: t.ruleEditor.resetTitle,
+            description: t.ruleEditor.resetConfirm,
             variant: 'destructive',
             onConfirm: () => {
                 // 重置为推荐的默认预设
@@ -145,9 +137,31 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
                     result = result.replace(new RegExp(rule.pattern, 'g'), rule.replacement)
                 } else if (rule.type === 'format') {
                     if (rule.pattern === 'clean_empty') result = result.split('\n').filter(l => l.trim()).join('\n')
-                    else if (rule.pattern === 'smart_quotes') result = result.replace(/[""]/g, '"').replace(/['']/g, "'")
+                    else if (rule.pattern === 'smart_quotes') {
+                        // 1. Handle explicit directional quotes
+                        result = result.replace(/“/g, '「').replace(/”/g, '」').replace(/‘/g, '『').replace(/’/g, '』')
+                        // 2. Robust pairing for straight quotes (" and ') - Balanced check within each line
+                        result = result.split('\n').map(line => {
+                            let processedLine = line
+                            // Only pair if count is even to avoid misalignment
+                            const dCount = (line.match(/"/g) || []).length
+                            if (dCount > 0 && dCount % 2 === 0) {
+                                processedLine = processedLine.replace(/"([^"]*)"/g, '「$1」')
+                            }
+                            const sCount = (processedLine.match(/'/g) || []).length
+                            if (sCount > 0 && sCount % 2 === 0) {
+                                processedLine = processedLine.replace(/'([^']*)'/g, '『$1』')
+                            }
+                            return processedLine
+                        }).join('\n')
+                    }
+                    else if (rule.pattern === 'ellipsis') {
+                        // Standardize ellipsis formats to ……
+                        // ... (3 or more) -> ……, 。。。 (3 or more) -> ……
+                        result = result.replace(/\.{3,}/g, '……').replace(/。{3,}/g, '……')
+                    }
                     else if (rule.pattern === 'full_to_half_punct') {
-                        const t: any = { '，': ',', '。': '.', '！': '!', '？': '?', '：': ':', '；': ';', '（': '(', '）': ')' }
+                        const t: Record<string, string> = { '，': ',', '。': '.', '！': '!', '？': '?', '：': ':', '；': ';', '（': '(', '）': ')' }
                         result = result.replace(/[，。！？：；（）]/g, m => t[m] || m)
                     }
                     else if (rule.pattern === 'ensure_single_newline') result = result.replace(/\n+/g, '\n')
@@ -285,7 +299,8 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
                                                 <select className="w-full border border-border p-2.5 rounded-lg text-sm bg-card focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" value={rule.pattern} onChange={e => updateRule(rule.id, { pattern: e.target.value })}>
                                                     <option value="">选择规则...</option>
                                                     <option value="clean_empty">删除空行 — 移除所有空白行</option>
-                                                    <option value="smart_quotes">统一引号 — 中英引号 → 直角引号「」</option>
+                                                    <option value="smart_quotes">统一引号 — 弯引号/直引号对 → 直角引号「」</option>
+                                                    <option value="ellipsis">规范省略号 — ... 或 。。。 → ……</option>
                                                     <option value="full_to_half_punct">全角→半角 — ，。！？ → , . ! ?</option>
                                                     <option value="ensure_single_newline">强制单换行 — 合并多个换行为一个</option>
                                                     <option value="ensure_double_newline">强制双换行 — 段落间双换行 (轻小说)</option>
@@ -294,7 +309,8 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
                                                 {rule.pattern && (
                                                     <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
                                                         {rule.pattern === 'clean_empty' && '⚠️ 会删除所有空行，不适合需要保留段落间距的轻小说格式'}
-                                                        {rule.pattern === 'smart_quotes' && '将 "文字" 统一为直角引号「文字」格式'}
+                                                        {rule.pattern === 'smart_quotes' && '将“引文”或 "引文" 统一为直角引号「引文」格式'}
+                                                        {rule.pattern === 'ellipsis' && '将多个连续句号或点号统一为标准省略号 ……'}
                                                         {rule.pattern === 'full_to_half_punct' && '全角中文标点转为半角英文标点'}
                                                         {rule.pattern === 'ensure_single_newline' && '将多个连续换行合并为单个换行，适合通用文档'}
                                                         {rule.pattern === 'ensure_double_newline' && '每段之间保持双换行，阅读体验更佳'}
