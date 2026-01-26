@@ -148,8 +148,8 @@ const getPythonPath = () => {
     if (is.dev) {
         return process.env.ELECTRON_PYTHON_PATH || 'python'
     }
-    // In prod: resources/python_env/python.exe
-    return join(process.resourcesPath, 'python_env', 'python.exe')
+    // In prod: resources/python_env/Scripts/python.exe
+    return join(process.resourcesPath, 'python_env', 'Scripts', 'python.exe')
 }
 
 // Helper for User Mutable Data (Models, Glossaries)
