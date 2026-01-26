@@ -62,3 +62,5 @@ GUI/middleware/glossaries/
 diff
 middleware/temp_rules_post.json
 middleware/temp_rules_pre.json
+
+release/

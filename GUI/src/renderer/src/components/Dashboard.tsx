@@ -31,7 +31,6 @@ export function Dashboard({ lang, active }: DashboardProps) {
 
     // Monitors
     const [monitorData, setMonitorData] = useState<MonitorData | null>(null)
-    const [thinkingContent, setThinkingContent] = useState("")
 
     const [modelPath, setModelPath] = useState<string>("")
     const [glossaryPath, setGlossaryPath] = useState<string>("")
@@ -262,10 +261,6 @@ export function Dashboard({ lang, active }: DashboardProps) {
                 }
 
                 if (log.startsWith("JSON_THINK_DELTA:")) {
-                    try {
-                        const chunk = JSON.parse(log.substring("JSON_THINK_DELTA:".length))
-                        setThinkingContent(prev => prev + chunk)
-                    } catch (e) { }
                     return
                 }
 
@@ -523,7 +518,7 @@ export function Dashboard({ lang, active }: DashboardProps) {
         setProgress({ current: 0, total: 0, percent: 0, elapsed: 0, remaining: 0, speedLines: 0, speedChars: 0, speedEval: 0, speedGen: 0, retries: 0 })
         setPreviewBlocks({})
         localStorage.removeItem("last_preview_blocks") // Clear persisted preview
-        setThinkingContent("")
+        localStorage.removeItem("last_preview_blocks") // Clear persisted preview
 
         // 根据 ctx 自动计算 chunk-size：公式 (ctx - 500) / 3.5 * 1.3 (Qwen Token Density)
         const ctxValue = parseInt(localStorage.getItem("config_ctx") || "4096")
@@ -1225,49 +1220,57 @@ export function Dashboard({ lang, active }: DashboardProps) {
                         </div>
 
                         {/* Right: Enhanced Speed Chart (65%) */}
-                        <div className="lg:w-[65%] bg-card rounded-lg border border-border/50 overflow-hidden flex flex-col min-h-[120px]">
+                        <div className="lg:w-[65%] bg-card rounded-lg border border-border/50 overflow-hidden flex flex-col h-[180px]">
                             <div className="py-1.5 px-3 border-b border-border/30 shrink-0 flex items-center justify-between">
                                 <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">{t.dashboard.speedChart}</span>
                                 <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500"></span>{t.dashboard.charPerSec}</span>
                                 </div>
                             </div>
-                            <div className="flex-1 p-2 outline-none focus:outline-none [&_*]:outline-none">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="colorSpeedGradient" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                                                <stop offset="50%" stopColor="#a78bfa" stopOpacity={0.2} />
-                                                <stop offset="100%" stopColor="#c4b5fd" stopOpacity={0.05} />
-                                            </linearGradient>
-                                        </defs>
-                                        <XAxis dataKey="time" hide />
-                                        <Tooltip
-                                            contentStyle={{
-                                                backgroundColor: 'rgba(37, 37, 53, 0.95)',
-                                                borderRadius: '10px',
-                                                border: '1px solid rgba(139, 92, 246, 0.3)',
-                                                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                                                color: '#cdd6f4',
-                                                fontSize: '11px',
-                                                padding: '8px 12px'
-                                            }}
-                                            formatter={(value: any) => [`${value} ${t.dashboard.charPerSec}`, t.dashboard.speed]}
-                                            labelFormatter={() => ''}
-                                        />
-                                        <Area
-                                            type="monotoneX"
-                                            dataKey="speed"
-                                            stroke="#8b5cf6"
-                                            strokeWidth={2.5}
-                                            fillOpacity={1}
-                                            fill="url(#colorSpeedGradient)"
-                                            animationDuration={200}
-                                            dot={false}
-                                        />
-                                    </AreaChart>
-                                </ResponsiveContainer>
+                            {/* 固定高度容器，彻底解决 ResponsiveContainer 的 0 尺寸报错 */}
+                            <div style={{ width: '100%', height: '140px', position: 'relative', padding: '8px' }}>
+                                {chartData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id="colorSpeedGradient" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                                                    <stop offset="50%" stopColor="#a78bfa" stopOpacity={0.2} />
+                                                    <stop offset="100%" stopColor="#c4b5fd" stopOpacity={0.05} />
+                                                </linearGradient>
+                                            </defs>
+                                            <XAxis dataKey="time" hide />
+                                            <Tooltip
+                                                contentStyle={{
+                                                    backgroundColor: 'rgba(37, 37, 53, 0.95)',
+                                                    borderRadius: '10px',
+                                                    border: '1px solid rgba(139, 92, 246, 0.3)',
+                                                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                                                    color: '#cdd6f4',
+                                                    fontSize: '11px',
+                                                    padding: '8px 12px'
+                                                }}
+                                                formatter={(value: any) => [`${value} ${t.dashboard.charPerSec}`, t.dashboard.speed]}
+                                                labelFormatter={() => ''}
+                                            />
+                                            <Area
+                                                type="monotoneX"
+                                                dataKey="speed"
+                                                stroke="#8b5cf6"
+                                                strokeWidth={2.5}
+                                                fillOpacity={1}
+                                                fill="url(#colorSpeedGradient)"
+                                                animationDuration={200}
+                                                dot={false}
+                                            />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground/30 text-[10px] space-y-1">
+                                        <Zap className="w-5 h-5 opacity-20" />
+                                        <span>Ready for Speed Tracking</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

@@ -72,6 +72,12 @@ def calculate_max_safe_ctx(vram_gb, ram_gb, model_size_gb=5.0):
     return max_ctx
 
 def main():
+    # Force UTF-8 for Windows stdout to prevent encoding-related JSON parse errors
+    import sys
+    import io
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
     vram_gb = get_nvidia_vram()
     ram_gb = get_system_ram()
     
@@ -88,7 +94,8 @@ def main():
         "is_cpu_only": vram_gb <= 0
     }
     
-    print(json.dumps(result))
+    # Use highly unique markers to prevent collision
+    print(f"__HW_SPEC_JSON_START__{json.dumps(result)}__HW_SPEC_JSON_END__")
 
 if __name__ == "__main__":
     main()

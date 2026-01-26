@@ -845,6 +845,14 @@ export function AdvancedView({ lang }: { lang: Language }) {
 
                                                 {/* Card 2: VRAM Estimates */}
                                                 {specs && (() => {
+                                                    if (specs.error) {
+                                                        return (
+                                                            <div className="relative overflow-hidden rounded-xl border border-red-500/20 bg-red-500/5 p-3 flex flex-col justify-center items-center h-full text-center">
+                                                                <span className="text-[10px] text-red-500/70 uppercase font-bold mb-1">Hardware Detection Error</span>
+                                                                <span className="text-[9px] text-red-400/80 leading-tight">{specs.error}</span>
+                                                            </div>
+                                                        )
+                                                    }
                                                     const slotCtx = parseInt(ctxSize)
                                                     const modelBase = modelInfo ? modelInfo.sizeGB : 5.9
                                                     const perSlotVram = slotCtx * 0.00015

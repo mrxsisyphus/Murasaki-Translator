@@ -54,16 +54,21 @@ function createWindow(): void {
         return { action: 'deny' }
     })
 
-    // HMR for renderer base on electron-vite cli.
     // Load the remote URL for development or the local html file for production.
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
         mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
         mainWindow.webContents.openDevTools()
     } else {
         mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-        // Ensure DevTools is closed in prod, just in case
-        if (!is.dev) mainWindow.webContents.closeDevTools()
     }
+
+    // Allow manual F12 toggle
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        if (input.key === 'F12' && input.type === 'keyDown') {
+            mainWindow?.webContents.toggleDevTools()
+            event.preventDefault()
+        }
+    })
 }
 
 /**
@@ -583,26 +588,80 @@ ipcMain.handle('get-hardware-specs', async () => {
     const scriptPath = join(middlewareDir, 'get_specs.py')
     const pythonCmd = getPythonPath()
 
+    console.log("[HardwareSpecs] Middleware Dir:", middlewareDir)
+    console.log("[HardwareSpecs] Python Cmd:", pythonCmd)
+    console.log("[HardwareSpecs] Script Path:", scriptPath)
+
     return new Promise((resolve) => {
         if (!fs.existsSync(scriptPath)) {
-            console.error("Spec script missing:", scriptPath)
-            resolve(null)
+            const err = `Spec script missing at: ${scriptPath}`
+            console.error(err)
+            resolve({ error: err })
             return
         }
 
         const proc = spawn(pythonCmd, ['get_specs.py'], {
             cwd: middlewareDir,
-            shell: true
+            shell: false
         })
 
         let output = ''
+        let errorOutput = ''
+        let resolved = false
+
+        const timeout = setTimeout(() => {
+            if (resolved) return
+            resolved = true
+            const errMsg = "Get specs timeout - killing process"
+            console.error(errMsg)
+            proc.kill()
+            resolve({ error: errMsg })
+        }, 10000)
+
         proc.stdout.on('data', (d) => output += d.toString())
-        proc.on('close', () => {
+        proc.stderr.on('data', (d) => errorOutput += d.toString())
+
+        proc.on('error', (err) => {
+            if (resolved) return
+            resolved = true
+            clearTimeout(timeout)
+            const errMsg = `Failed to spawn specs process: ${err.message}`
+            console.error(errMsg)
+            resolve({ error: errMsg })
+        })
+
+        proc.on('close', (code) => {
+            if (resolved) return
+            resolved = true
+            clearTimeout(timeout)
+
+            if (code !== 0) {
+                const err = `Get specs failed (code ${code}): ${errorOutput}`
+                console.error(err)
+                resolve({ error: err })
+                return
+            }
+
             try {
-                resolve(JSON.parse(output))
+                // Find JSON in output with unique markers
+                const match = output.match(/__HW_SPEC_JSON_START__(.*?)__HW_SPEC_JSON_END__/s)
+                if (match) {
+                    const data = JSON.parse(match[1])
+                    resolve(data)
+                } else {
+                    // Legacy/Fallback parsing
+                    try {
+                        resolve(JSON.parse(output.trim()))
+                    } catch {
+                        const err = `No valid JSON found in specs output. Raw: ${output}`
+                        console.error(err)
+                        resolve({ error: err })
+                    }
+                }
             } catch (e) {
-                console.error("Failed to parse specs:", output)
-                resolve(null)
+                const err = `Failed to parse specs: ${e}. Output: ${output}`
+                console.error(err)
+                resolve({ error: err })
             }
         })
         proc.on('error', (e) => {
