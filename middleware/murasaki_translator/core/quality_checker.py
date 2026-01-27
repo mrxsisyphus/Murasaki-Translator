@@ -294,6 +294,7 @@ def calculate_glossary_coverage(
         (是否通过, 输出覆盖率, CoT覆盖率, 命中数, 应命中总数)
     """
     if not glossary:
+        print("[Glossary Check] Skipped (Zero glossary entries found/loaded).")
         return True, 100.0, 0.0, 0, 0
     
     # 找出原文中出现的术语
@@ -304,6 +305,7 @@ def calculate_glossary_coverage(
             relevant_terms[src_term] = dst_term
     
     if not relevant_terms:
+        print(f"[Glossary Check] Skipped (No relevant terms found in {len(source_text)} chars of source text).")
         return True, 100.0, 0.0, 0, 0
     
     total = len(relevant_terms)
@@ -321,17 +323,41 @@ def calculate_glossary_coverage(
     if cot_text:
         cot_hit_count = 0
         for src_term in relevant_terms.keys():
+            # Check if source term appears in CoT (Model noticed the term)
             if src_term in cot_text:
                 cot_hit_count += 1
         cot_coverage = (cot_hit_count / total * 100) if total > 0 else 0.0
 
-    # 判定逻辑
+    # 判定逻辑 (Pass if EITHER output OR CoT meets threshold)
+    # Bug Fix / Improvement: Log detailed breakdown for debugging
     passed = False
+    reason = "Failed"
+    
     if output_coverage >= output_hit_threshold:
         passed = True
+        reason = f"Output Coverage ({output_coverage:.1f}%) >= Threshold ({output_hit_threshold}%)"
     elif cot_coverage >= cot_coverage_threshold:
         passed = True
+        reason = f"CoT Coverage ({cot_coverage:.1f}%) >= Threshold ({cot_coverage_threshold}%)"
     
+    # Detailed Logging (Only if not passed or debug)
+    # Construct a log message regardless to help user trace
+    missed_output = [t for t, d in relevant_terms.items() if d not in translated_text]
+    missed_cot = [t for t in relevant_terms.keys() if t not in cot_text] if cot_text else []
+    
+    log_msg = (
+        f"[Glossary Check] {reason}. "
+        f"Total Terms: {total}. "
+        f"Output Hit: {output_hit_count} ({output_coverage:.1f}%), "
+        f"CoT Hit: {cot_hit_count} ({cot_coverage:.1f}%). "
+    )
+    
+    if not passed:
+        log_msg += f"\n  Missed in Output: {', '.join(missed_output[:10])}..."
+    
+    # Print to stdout/log for debugging
+    print(log_msg)
+
     return passed, output_coverage, cot_coverage, output_hit_count, total
 
 

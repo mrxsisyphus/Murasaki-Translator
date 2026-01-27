@@ -1,13 +1,14 @@
 """Text Chunker - Splits input text into translation-sized blocks."""
 
-from typing import List
-from dataclasses import dataclass
+from typing import List, Any, Dict, Union
+from dataclasses import dataclass, field
 
 @dataclass
 class TextBlock:
     """分块数据类"""
     id: int
     prompt_text: str  # 用于 Prompt 的文本
+    metadata: List[Any] = field(default_factory=list) # 源数据的元信息 (如行号、节点ID、时间戳)
 
 class Chunker:
     def __init__(self, target_chars: int = 1200, max_chars: int = 2000, mode: str = "doc", 
@@ -19,55 +20,79 @@ class Chunker:
         self.balance_threshold = balance_threshold
         self.balance_range = balance_range
 
-    def process(self, lines: List[str]) -> List[TextBlock]:
+    def process(self, items: List[Union[str, Dict[str, Any]]]) -> List[TextBlock]:
+        """
+        Process a list of strings or dicts into chunks.
+        If dicts, expects {'text': str, 'meta': Any}
+        """
+        # Normalize input to list of (text, meta) tuples
+        normalized_items = []
+        for item in items:
+            if isinstance(item, str):
+                normalized_items.append((item, None))
+            elif isinstance(item, dict):
+                normalized_items.append((item.get('text', ''), item.get('meta')))
+            
         if self.mode == "line":
-            return self._process_line_by_line(lines)
+            return self._process_line_by_line(normalized_items)
         else:
-            return self._process_rubber_band(lines)
+            return self._process_rubber_band(normalized_items)
 
-    def _process_line_by_line(self, lines: List[str]) -> List[TextBlock]:
+    def _process_line_by_line(self, items: List[tuple]) -> List[TextBlock]:
         """
         Mode: Line (Identity Strategy)
         每一行（非空）作为一个独立的 Block。
         """
         blocks = []
-        for line in lines:
-            text = line.strip()
-            if text:
-                blocks.append(TextBlock(id=len(blocks)+1, prompt_text=text))
+        for text, meta in items:
+            clean_text = text.strip()
+            if clean_text:
+                blocks.append(TextBlock(
+                    id=len(blocks)+1, 
+                    prompt_text=clean_text,
+                    metadata=[meta] if meta is not None else []
+                ))
         return blocks
 
-    def _process_rubber_band(self, lines: List[str]) -> List[TextBlock]:
+    def _process_rubber_band(self, items: List[tuple]) -> List[TextBlock]:
         """
         Mode: Doc (Rubber Band Strategy)
         智能合并多行，通过标点符号寻找最佳切分点。
         """
         blocks = []
-        current_chunk = []
+        current_chunk_text = []
+        current_chunk_meta = []
         current_char_count = 0
         
         # 安全断句符号
         SAFE_PUNCTUATION = ['。', '！', '？', '……', '”', '」', '\n']
 
-        for line in lines:
-            line_stripped = line.strip()
+        for text, meta in items:
+            # text_stripped = text.strip() # Don't strip here, keep original spacing for detection if needed
+            # But line-based logic usually assumes lines.
+            
             # 累积
-            current_chunk.append(line)
-            current_char_count += len(line)
+            current_chunk_text.append(text)
+            if meta is not None:
+                current_chunk_meta.append(meta)
+            
+            current_char_count += len(text)
             
             # 检查是否满足切分条件
             # 1. 超过目标长度 (或接近目标长度前30字) 且 遇到标点
             # 2. 超过最大强制长度
+            text_stripped = text.strip()
             if current_char_count >= (self.target_chars - 30):
-                if any(line_stripped.endswith(p) for p in SAFE_PUNCTUATION) or current_char_count >= self.max_chars:
-                   self._create_block(blocks, current_chunk)
-                   current_chunk = []
+                if any(text_stripped.endswith(p) for p in SAFE_PUNCTUATION) or current_char_count >= self.max_chars:
+                   self._create_block(blocks, current_chunk_text, current_chunk_meta)
+                   current_chunk_text = []
+                   current_chunk_meta = []
                    current_char_count = 0
         
         # 处理剩余内容
-        if current_chunk:
+        if current_chunk_text:
              # 创建最后一个块
-             self._create_block(blocks, current_chunk)
+             self._create_block(blocks, current_chunk_text, current_chunk_meta)
              
         # 平衡最后几个块 (Tail Balancing)
         if self.enable_balance and len(blocks) >= 2:
@@ -75,19 +100,48 @@ class Chunker:
             
         return blocks
     
-    def _create_block(self, blocks: List[TextBlock], lines: List[str]):
+    def _create_block(self, blocks: List[TextBlock], lines: List[str], meta: List[Any]):
         """Helper to create a block"""
         text = "".join(lines)
         if not text.strip():
             return
-        blocks.append(TextBlock(id=len(blocks)+1, prompt_text=text))
+        blocks.append(TextBlock(
+            id=len(blocks)+1, 
+            prompt_text=text,
+            metadata=meta
+        ))
 
     def _balance_tail(self, blocks: List[TextBlock]):
         """
         Configurable Tail Balancing
         If the last block is too small (below threshold), merge it with previous N blocks
         and redistribute the content evenly.
+        
+        WARNING: Generative redistribution destroys metadata mapping if not careful.
+        For now, we will DISABLE precise metadata mapping for balanced blocks or 
+        we simply attach all metadata to the first block of the group (imprecise).
+        
+        Ideally, we should redistribute metadata based on text length which is complex.
+        Given strict "Original Output" requirement, we must be careful.
+        
+        Strategic Decision: If metadata is present (Structured Document), we should probably 
+        DISABLE aggressive re-balancing that splits lines, OR ensure line-level integrity.
+        
+        However, since `items` are passed as lines, and `splitlines` effectively restores them 
+        if we join them... 
+        But wait, `_balance_tail` does `combined_text.splitlines()`. 
+        If the input was broken mid-sentence (e.g. fixed width file), splitlines works.
+        If input was granular nodes (e.g. EPUB p tags), `splitlines` might split a single p tag 
+        if it contained \n. 
+        
+        For Safety in v1.0 Multi-Format:
+        We will SKIP balancing if the blocks have metadata to ensure safety.
         """
+        # Check if we have metadata
+        if any(b.metadata for b in blocks):
+             # print("[Chunker] Metadata detected. Skipping tail balancing to preserve structure.")
+             return
+
         # Determine how many blocks to involve (min of existing blocks and configured range)
         n = min(len(blocks), self.balance_range)
         if n < 2: return

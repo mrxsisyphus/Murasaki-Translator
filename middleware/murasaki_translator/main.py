@@ -1,6 +1,4 @@
-"""Murasaki Translator v1.0 - Production Translation Engine"""
-
-import argparse
+"""Murasaki Translator  - Production Translation Engine"""
 import sys
 import os
 import time
@@ -47,6 +45,7 @@ from rule_processor import RuleProcessor
 from murasaki_translator.utils.monitor import HardwareMonitor
 from murasaki_translator.utils.line_aligner import LineAligner
 from murasaki_translator.fixer import NumberFixer, Normalizer, PunctuationFixer, KanaFixer, RubyCleaner
+from murasaki_translator.documents import DocumentFactory
 
 def load_glossary(path: Optional[str]) -> Dict[str, str]:
     """
@@ -281,8 +280,6 @@ def translate_single_block(args):
         # 2. Pre-processing & Protection
         processed_src = pre_processor.process(src_text)
         processed_src = Normalizer.normalize(processed_src)
-        if getattr(args, 'fix_ruby', False):
-            processed_src = RubyCleaner.clean(processed_src)
             
         if protector:
             processed_src = protector.protect(processed_src)
@@ -308,21 +305,9 @@ def translate_single_block(args):
             parsed_lines, cot_content = parser.parse(raw_output)
             base_text = '\n'.join(parsed_lines)
             
-            # Built-in Fixers
-            base_text = NumberFixer.fix(src_text, base_text)
-            if getattr(args, 'fix_punctuation', False):
-                base_text = PunctuationFixer.fix(src_text, base_text, target_is_cjk=True)
-            if getattr(args, 'fix_kana', False):
-                base_text = KanaFixer.fix(base_text)
-            
-            # Restore protected text
-            if protector:
-                restored_text = protector.restore(base_text)
-            else:
-                restored_text = base_text
-                
-            # Post-rules (Final Layout)
-            final_dst = post_processor.process(restored_text)
+            # Unified Rule Processor Application (Integrated Restoration)
+            # This replaces the hardcoded NumberFixer, PunctuationFixer, KanaFixer calls
+            final_dst = post_processor.process(base_text, src_text=src_text, protector=protector)
             
             result = {
                 'success': True,
@@ -593,32 +578,57 @@ def main():
     
 
     
-    # Initialize Rule Processors
-    pre_rules = load_rules(args.rules_pre)
-    post_rules = load_rules(args.rules_post)
+    # --- Unified Pipeline Injection ---
+    def add_unique_rule(rule_list, pattern, r_type='format', pos='append'):
+        if any(r.get('pattern') == pattern for r in rule_list): return
+        rule_obj = {"type": r_type, "pattern": pattern, "active": True}
+        if pos == 'prepend': rule_list.insert(0, rule_obj)
+        else: rule_list.append(rule_obj)
+
+    # 1. Pre-rules
+    pre_rules = load_rules(args.rules_pre) if args.rules_pre else []
+    if args.fix_ruby:
+        add_unique_rule(pre_rules, "ruby_cleaner", pos='prepend')
     
-    # Inject Line Format Rule (Backend System Rule)
-    # Only inject if user hasn't defined their own format rule in post_rules
+    # 2. Post-rules
+    post_rules = load_rules(args.rules_post) if args.rules_post else []
+    if args.fix_kana:
+        add_unique_rule(post_rules, "kana_fixer")
+    if args.fix_punctuation:
+        add_unique_rule(post_rules, "punctuation_fixer")
+    if args.traditional:
+        add_unique_rule(post_rules, "traditional_chinese")
+
+    add_unique_rule(post_rules, "number_fixer")
+
+    # [Audit Fix] Auto-detect protection requirement from rules
+    protection_rules = [r for r in post_rules if r.get('pattern') == 'restore_protection']
+    if protection_rules:
+        if not args.text_protect:
+            print("[Auto-Config] Detected 'restore_protection' rule. Enabling TextProtector.")
+            args.text_protect = True
+        
+        # Override protector patterns if customPattern is defined in rule options
+        # We now support COLLECTING multiple patterns from multiple rules
+        custom_patterns = [r.get('options', {}).get('customPattern') for r in protection_rules if r.get('options', {}).get('customPattern')]
+        if custom_patterns:
+            custom_protector_patterns = custom_patterns
+            print(f"[Auto-Config] Using {len(custom_patterns)} custom protection pattern(s) from rules.")
+        else:
+            custom_protector_patterns = None # Fallback to default in TextProtector
+    else:
+        custom_protector_patterns = None
+
+    # Inject Line Format Rule
     has_format_rule = any(r.get('pattern', '').startswith('ensure_') for r in post_rules)
-    
     if not has_format_rule:
         if args.line_format == "single":
-            post_rules.append({"type": "format", "pattern": "ensure_single_newline", "active": True})
+            add_unique_rule(post_rules, "ensure_single_newline")
         elif args.line_format == "double":
-            post_rules.append({"type": "format", "pattern": "ensure_double_newline", "active": True})
+            add_unique_rule(post_rules, "ensure_double_newline")
     
     pre_processor = RuleProcessor(pre_rules)
     post_processor = RuleProcessor(post_rules)
-    
-    # Initialize OpenCC if enabled
-    cc_converter = None
-    if args.traditional:
-        try:
-            import opencc
-            cc_converter = opencc.OpenCC('s2tw')
-            print("OpenCC initialized: Simplified -> Traditional Chinese")
-        except Exception as e:
-            print(f"[Warning] Failed to initialize OpenCC: {e}")
 
     print(f"Loaded {len(pre_processor.rules)} pre-processing rules.")
     print(f"Loaded {len(post_processor.rules)} post-processing rules.")
@@ -626,30 +636,17 @@ def main():
     try:
         engine.start_server()
         
-        # Read Input
-        if input_path.lower().endswith('.epub'):
-            print("Detected EPUB input. Extracting text...")
-            try:
-                from murasaki_translator.utils.epub_loader import extract_text_from_epub
-                lines = extract_text_from_epub(input_path)
-                print(f"Extracted {len(lines)} lines from EPUB.")
-            except ImportError as e:
-                print(f"Error: {e}")
-                return
-            except Exception as e:
-                print(f"Error reading EPUB: {e}")
-                return
-        else:
-            with open(input_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+        # Read Input using DocumentFactory
+        doc = DocumentFactory.get_document(input_path)
+        items = doc.load()
             
         # Chunking
-        blocks = chunker.process(lines)
+        blocks = chunker.process(items)
         print(f"[{args.mode.upper()} Mode] Input split into {len(blocks)} blocks.")
         
-        # 源文本统计（用于历史记录） - 仅统计非空行
-        source_lines = len([l for l in lines if l.strip()])
-        source_chars = sum(len(l) for l in lines if l.strip())
+        # 源文本统计
+        source_lines = len([i for i in items if i['text'].strip()])
+        source_chars = sum(len(i['text']) for i in items if i['text'].strip())
         
         # Debug output (only when --debug is enabled)
         if args.debug:
@@ -672,15 +669,19 @@ def main():
         # 初始化翻译缓存（用于校对界面）
         translation_cache = TranslationCache(output_path, custom_cache_dir=args.cache_path) if args.save_cache else None
         
-        # Load custom protection patterns once
-        custom_protector_patterns = None
+        # Load legacy custom protection patterns file if provided via CLI
         if args.protect_patterns and os.path.exists(args.protect_patterns):
              try:
                  with open(args.protect_patterns, 'r', encoding='utf-8') as f:
-                     custom_protector_patterns = [line.strip() for line in f if line.strip()]
-                 print(f"Loaded {len(custom_protector_patterns)} custom protection patterns.")
+                     legacy_patterns = [line.strip() for line in f if line.strip()]
+                     # If we don't already have patterns from the new Rule system, use these
+                     if not custom_protector_patterns:
+                         custom_protector_patterns = legacy_patterns
+                         print(f"Loaded {len(custom_protector_patterns)} legacy protection patterns from file.")
+                     else:
+                         print("[Info] New rule-based protection pattern taking precedence over legacy file.")
              except Exception as e:
-                 print(f"[Warning] Failed to load protection patterns: {e}")
+                 print(f"[Warning] Failed to load legacy protection patterns: {e}")
         
         gpu_name = get_gpu_name()  # Get GPU Name once
         display_name, params, quant = format_model_info(args.model)
@@ -751,6 +752,7 @@ def main():
         # Incremental Translation / Resume Logic
         skip_blocks_from_output = 0 # Blocks skipped based on final output file
         precalculated_temp = {}    # Blocks already processed and stored in temp file
+        existing_content = []      # [Audit Fix] Store lines for document reconstruction
         resume_config_matched = False
         
         if args.resume:
@@ -766,6 +768,7 @@ def main():
                 print(f"[Resume] Found {existing_lines} existing lines in output. Will skip first {skip_blocks_from_output}/{len(blocks)} blocks.")
             else:
                 print("[Resume] No valid existing output found. Starting fresh.")
+                existing_content = [] # Reset if invalid
 
             # Load temporary progress from .temp.jsonl file.
             # Returns: {block_idx: result_dict}
@@ -829,7 +832,7 @@ def main():
             # ========================================
             # Parallel Worker Function
             # ========================================
-            def process_block_task(block_idx: int, block: object):
+            def process_block_task(block_idx: int, block: object, strict_mode: bool = False):
                 """Worker Task"""
                 logger.info(f"[Block {block_idx+1}/{len(blocks)}] Starting translation...")
                 start_block_time = time.time()
@@ -855,18 +858,21 @@ def main():
                     while os.path.exists(pause_file):
                          time.sleep(1)
                     
-                    # Pre-processing
-                    processed_src_text = pre_processor.process(block.prompt_text)
+                    # Pre-processing using Unified RuleProcessor
+                    logger.debug(f"[Block {block_idx+1}] Pre-processing start (len: {len(block.prompt_text)})")
+                    processed_src_text = pre_processor.process(block.prompt_text, strict_line_count=strict_mode)
+                    logger.debug(f"[Block {block_idx+1}] After Pre-rules: {len(processed_src_text)} chars")
+                    
                     processed_src_text = Normalizer.normalize(processed_src_text)
-                    if args.fix_ruby:
-                        processed_src_text = RubyCleaner.clean(processed_src_text)
                     
                     # Thread-Safe Text Protector (Local instantiation)
                     # Use custom_protector_patterns captured from outer scope
                     local_protector = None
                     if args.text_protect:
                          local_protector = TextProtector(patterns=custom_protector_patterns)
+                         logger.debug(f"[Block {block_idx+1}] [Experimental] Protection start")
                          processed_src_text = local_protector.protect(processed_src_text)
+                         logger.debug(f"[Block {block_idx+1}] [Experimental] After Protection: {len(processed_src_text)} chars")
                     
                     # Build Prompt
                     messages = prompt_builder.build_messages(
@@ -1027,36 +1033,15 @@ def main():
                             final_cot = ""
                             final_raw = ""
 
-                    # Post-Process (Fixers & Rules)
-                    # 1. Join decoded lines to block text
+                    # Post-Process (Consolidated Pipeline)
+                    # 1. Join decoded lines
                     base_text = '\n'.join(final_parsed_lines)
                     
-                    # 2. Apply Built-in Fixers (Block Level - more robust against line shifts)
-                    # Number Fixer: Restore circled numbers ①② etc.
-                    base_text = NumberFixer.fix(block.prompt_text, base_text)
-                    
-                    # Punctuation Fixer: Normalize CJK punctuation pairs
-                    if args.fix_punctuation:
-                        base_text = PunctuationFixer.fix(block.prompt_text, base_text, target_is_cjk=True)
-                        
-                    # Kana Fixer: Remove residual kana (orphan onomatopoeia)
-                    if args.fix_kana:
-                        # Bugfix: KanaFixer.fix takes 1 arg (dst)
-                        base_text = KanaFixer.fix(base_text)
-                    
-                    # Restoration (Protection)
-                    if local_protector:
-                        # Apply restoration to the potentially fixed base_text
-                        restored_text = local_protector.restore(base_text)
-                    else:
-                        restored_text = base_text
-                    
-                    # Final Rule Processing (for Layout/Format)
-                    processed_text = post_processor.process(restored_text)
-                    
-                    # Traditional Chinese Usage
-                    if cc_converter:
-                        processed_text = cc_converter.convert(processed_text)
+                    # 2. Unified Rule Processor Application (Integrated Restoration)
+                    # Restoration happens inside process() if 'restore_protection' rule exists
+                    logger.debug(f"[Block {block_idx+1}] Post-processing start (len: {len(base_text)})")
+                    processed_text = post_processor.process(base_text, src_text=block.prompt_text, protector=local_protector, strict_line_count=strict_mode)
+                    logger.debug(f"[Block {block_idx+1}] Post-processing finished (len: {len(processed_text)})")
                     
                     # Ensure Consistency: Preview = Output = Cache
                     preview_text = processed_text
@@ -1130,6 +1115,46 @@ def main():
             # We maintain a map of future -> index
             future_to_index = {}
             
+            # --- Ordered Buffer for Writing & Reconstruction ---
+            all_results = [None] * len(blocks) # Pre-fill for structural reconstruction
+            
+            # Determine if we should use strict line count (structured docs)
+            _, file_ext = os.path.splitext(input_path)
+            is_structured_doc = file_ext.lower() in ['.epub', '.srt']
+
+            # [Audit Fix] Fill skipped blocks from output file to support EPUB/SRT reconstruction
+            # Only for structured docs as TXT streaming is sufficient and reconstruction causes drift
+            if skip_blocks_from_output > 0 and existing_content and is_structured_doc:
+                print(f"[Resume] Rebuilding memory state for {skip_blocks_from_output} blocks (Structured Doc)...")
+                current_line_ptr = 0
+                for idx in range(skip_blocks_from_output):
+                    # Conservative reconstruction based on source block line counts
+                    # This assumes strict_line_count was used in previous run
+                    block_lines_count = blocks[idx].prompt_text.count('\n') + 1
+                    block_lines = existing_content[current_line_ptr : current_line_ptr + block_lines_count]
+                    
+                    if block_lines:
+                        all_results[idx] = {
+                            "success": True,
+                            "out_text": '\n'.join(block_lines),
+                            "preview_text": '\n'.join(block_lines),
+                            "block_idx": idx,
+                            "is_restorer": True,
+                            "warnings": [],
+                            "src_text": blocks[idx].prompt_text,
+                            "cot_chars": 0,
+                            "usage": {}
+                        }
+                    else:
+                        print(f"[Resume] Warning: Could not find content for block {idx} in existing output.")
+                    
+                    current_line_ptr += block_lines_count
+            elif skip_blocks_from_output > 0:
+                print(f"[Resume] Skipping memory reconstruction for unstructured document (TXT).")
+
+            if is_structured_doc:
+                print(f"[Init] Detected structured document ({file_ext}). Enabling strict line count mode.")
+
             print(f"Starting execution with {max_workers} threads...")
             
             for i, block in enumerate(blocks):
@@ -1142,11 +1167,18 @@ def main():
                     future = executor.submit(restore_block_task, i, precalculated_temp[i])
                     print(f"  - Restoring Block {i+1} from temp file...")
                 else:
-                    future = executor.submit(process_block_task, i, block)
+                    # Pass is_structured_doc to task if needed, but RuleProcessor is globally initialized
+                    # Actually we should initialize the processors WITH this flag or pass it to process()
+                    future = executor.submit(process_block_task, i, block, is_structured_doc)
                 
                 future_to_index[future] = i
-                
-            # --- 修复后的核心循环逻辑 ---
+            
+            # Fill skipped blocks if they exist in precalculated_temp or if we need to regenerate?
+            # For now, if we resume, we rely on the fact that doc.save usually only needs the new blocks?
+            # NO, for EPUB/SRT, we need THE ENTIRE document.
+            if skip_blocks_from_output > 0:
+                print(f"[Resume] Warning: Full document reconstruction (EPUB/SRT) requires all blocks. Currently only new blocks are in memory.")
+            
             results_buffer = {}
             next_write_idx = skip_blocks_from_output
             
@@ -1264,9 +1296,38 @@ def main():
                         f_out.write(f"\n[Block {curr_disp} Failed]\n")
                     
                     f_out.flush()
+                    
+                    # Store for final save if needed (e.g. EPUB)
+                    all_results[next_write_idx] = res
                     next_write_idx += 1
 
             executor.shutdown(wait=False)
+            
+            # Final Save using Document Handler (for structure reconstruction)
+            # Only for structured docs. TXT is already saved via streaming f_out.
+            if is_structured_doc:
+                try:
+                    # We need TextBlock objects with prompt_text = translated_text
+                    # to satisfy the doc.save(output_path, blocks) signature
+                    from murasaki_translator.core.chunker import TextBlock
+                    translated_blocks = []
+                    for i, res in enumerate(all_results):
+                        if res and res.get('out_text') is not None:
+                            translated_blocks.append(TextBlock(
+                                id=i,
+                                prompt_text=res['out_text'],
+                                metadata=blocks[i].metadata
+                            ))
+                        else:
+                            # Placeholder for failed or missing blocks
+                            translated_blocks.append(blocks[i])
+                    
+                    doc.save(output_path, translated_blocks)
+                    print(f"[Success] Structured document rebuilt: {output_path}")
+                except Exception as e:
+                    print(f"[Warning] Final document reconstruction failed: {e}")
+            else:
+                print(f"[Success] Translation completed. Output saved to: {output_path}")
 
         # 任务结束后的总结
         total_time = time.time() - start_time

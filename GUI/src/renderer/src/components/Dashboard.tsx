@@ -546,17 +546,14 @@ export function Dashboard({ lang, active }: DashboardProps) {
             rulesPre: JSON.parse(localStorage.getItem("config_rules_pre") || "[]"),
             rulesPost: JSON.parse(localStorage.getItem("config_rules_post") || "[]"),
             saveCot: saveCot,
-            traditional: localStorage.getItem("config_traditional") === "true",
+
             // Device Mode
             deviceMode: localStorage.getItem("config_device_mode") || "auto",
 
             // Just ensure no style overrides causing issues here, actual display is in the JSX
             gpuDeviceId: localStorage.getItem("config_gpu_device_id") || "",
             // Text Processing Options (from Settings)
-            // Text Processing Options (from Settings)
-            fixRuby: localStorage.getItem("config_fix_ruby") === "true",
-            fixKana: localStorage.getItem("config_fix_kana") === "true",
-            fixPunctuation: localStorage.getItem("config_fix_punctuation") === "true",
+
             // Quality Control Settings
             temperature: parseFloat(localStorage.getItem("config_temperature") || "0.7"),
 
@@ -579,10 +576,6 @@ export function Dashboard({ lang, active }: DashboardProps) {
 
             // Incremental Translation (增量翻译)
             resume: forceResume !== undefined ? forceResume : (localStorage.getItem("config_resume") === "true"),
-
-            // Text Protection (文本保护)
-            textProtect: localStorage.getItem("config_text_protect") === "true",
-            protectPatterns: localStorage.getItem("config_protect_patterns") || "",
 
             // Dynamic Retry Strategy (动态重试策略)
             retryTempBoost: parseFloat(localStorage.getItem("config_retry_temp_boost") || "0.1"),

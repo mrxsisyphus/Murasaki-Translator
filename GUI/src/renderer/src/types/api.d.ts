@@ -153,6 +153,9 @@ export interface ElectronAPI {
         glossaryPath?: string
         temperature?: number
     }) => Promise<{ success: boolean; dst?: string; error?: string }>
+
+    // Rule System
+    testRules: (text: string, rules: any[]) => Promise<{ success: boolean; steps: { label: string; text: string }[]; error?: string }>
 }
 
 declare global {

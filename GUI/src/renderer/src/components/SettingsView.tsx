@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { Save, Settings, Trash2, AlertTriangle, Download, FolderOpen, XCircle, Github, Globe, ExternalLink, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/core"
-import { Button, Switch } from "./ui/core"
+import { Button } from "./ui/core"
 import { AlertModal } from "./ui/AlertModal"
 import { translations, Language } from "../lib/i18n"
 import { APP_CONFIG } from "../lib/config"
@@ -15,7 +15,7 @@ export function SettingsView({ lang }: { lang: Language }) {
     const [outputDir, setOutputDir] = useState("")
     const [autoTxt, setAutoTxt] = useState(false)
     const [autoEpub, setAutoEpub] = useState(false)
-    const [traditional, setTraditional] = useState(false)
+
     // Storage Config
     const [cacheDir, setCacheDir] = useState("")
 
@@ -29,7 +29,7 @@ export function SettingsView({ lang }: { lang: Language }) {
         setOutputDir(localStorage.getItem("config_output_dir") || "")
         setAutoTxt(localStorage.getItem("config_auto_txt") === "true")
         setAutoEpub(localStorage.getItem("config_auto_epub") === "true")
-        setTraditional(localStorage.getItem("config_traditional") === "true")
+
         setCacheDir(localStorage.getItem("config_cache_dir") || "")
     }, [])
 
@@ -83,7 +83,7 @@ export function SettingsView({ lang }: { lang: Language }) {
         localStorage.setItem("config_output_dir", outputDir)
         localStorage.setItem("config_auto_txt", String(autoTxt))
         localStorage.setItem("config_auto_epub", String(autoEpub))
-        localStorage.setItem("config_traditional", String(traditional))
+
         localStorage.setItem("config_cache_dir", cacheDir)
 
         setSaved(true)
@@ -225,10 +225,9 @@ export function SettingsView({ lang }: { lang: Language }) {
 
             {/* Scrollable Content Area */}
             <div className="flex-1 overflow-y-auto px-8 pb-4 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/30">
-                {/* Output Settings */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-base">{t.config.outputConfig}</CardTitle>
+                        <CardTitle className="text-base">{t.settingsTitle}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
                         {/* Output Directory */}
@@ -270,39 +269,9 @@ export function SettingsView({ lang }: { lang: Language }) {
 
                         <div className="h-px bg-border" />
 
-                        {/* Output Options */}
-                        <div className="space-y-4">
-                            {/* Traditional Chinese */}
-                            <div className="flex items-start gap-4">
-                                <Switch
-                                    checked={traditional}
-                                    onCheckedChange={setTraditional}
-                                    className="mt-1"
-                                />
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium">{t.config.traditional}</span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                        {t.config.traditionalDesc}
-                                    </p>
-                                </div>
-                            </div>
-
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Storage Settings */}
-                <div className="pt-6">
-                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2 mb-3 px-1">
-                        {t.config.storage.title}
-                    </h3>
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-base">{t.config.storage.cacheDir}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
+                        {/* Storage - Cache Directory */}
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium block">{t.config.storage.cacheDir}</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -339,9 +308,9 @@ export function SettingsView({ lang }: { lang: Language }) {
                                     ? t.settingsView.cacheDirDesc
                                     : t.settingsView.cacheDirDefaultDesc}
                             </p>
-                        </CardContent>
-                    </Card>
-                </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
                 {/* Update Settings */}
                 <div className="pt-6">

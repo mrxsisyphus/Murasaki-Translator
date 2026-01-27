@@ -40,9 +40,6 @@ export function AdvancedView({ lang }: { lang: Language }) {
     const [modelInfo, setModelInfo] = useState<any>(null)
 
     // Text Processing State
-    const [fixRuby, setFixRuby] = useState(false)
-    const [fixKana, setFixKana] = useState(false)
-    const [fixPunctuation, setFixPunctuation] = useState(false)
 
     // Quality Control Settings (高级质量控制)
     const [temperature, setTemperature] = useState(0.7)
@@ -132,10 +129,6 @@ export function AdvancedView({ lang }: { lang: Language }) {
             loadModelInfo(savedModel)
         }
 
-        // Load Fixer Config
-        setFixRuby(localStorage.getItem("config_fix_ruby") === "true")
-        setFixKana(localStorage.getItem("config_fix_kana") === "true")
-        setFixPunctuation(localStorage.getItem("config_fix_punctuation") === "true")
 
         // Load Quality Control Config
         const savedTemp = localStorage.getItem("config_temperature")
@@ -262,10 +255,6 @@ export function AdvancedView({ lang }: { lang: Language }) {
         localStorage.setItem("config_device_mode", deviceMode)
         localStorage.setItem("config_gpu_device_id", gpuDeviceId)
 
-        // Save Fixer Config
-        localStorage.setItem("config_fix_ruby", String(fixRuby))
-        localStorage.setItem("config_fix_kana", String(fixKana))
-        localStorage.setItem("config_fix_punctuation", String(fixPunctuation))
 
         // Save Quality Control Config
         localStorage.setItem("config_temperature", String(temperature))
@@ -1623,81 +1612,8 @@ export function AdvancedView({ lang }: { lang: Language }) {
                                     </p>
                                 </div>
 
-                                {/* Text Protection */}
-                                <div className="space-y-3 border-t pt-4">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-medium">{t.advancedView.textProtect}</span>
-                                            <span className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded">{t.advancedView.resumeBadge}</span>
-                                        </div>
-                                        <Switch
-                                            checked={enableTextProtect}
-                                            onCheckedChange={(v) => {
-                                                setEnableTextProtect(v)
-                                                localStorage.setItem("config_text_protect", v.toString())
-                                            }}
-                                        />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t.advancedView.textProtectDesc}
-                                    </p>
+                                {/* Spacer */}
 
-                                    {enableTextProtect && (
-                                        <div className="mt-4 space-y-2">
-                                            <label className="text-xs font-medium text-foreground">{t.advancedView.customRegex}</label>
-                                            <textarea
-                                                className="w-full h-32 border rounded p-2 text-xs font-mono bg-secondary resize-none"
-                                                placeholder={`^<[^>]+>$\n\\{.*?\\}\n(Name|Skill):`}
-                                                value={protectPatterns}
-                                                onChange={e => setProtectPatterns(e.target.value)}
-                                            />
-                                            <p className="text-[10px] text-muted-foreground">
-                                                {t.advancedView.customRegexDesc}
-                                                <br />{t.advancedView.customRegexExample} <code>&lt;Speaker&gt;</code> / <code>\[.*?\]</code>
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                                {/* --- 预处理 (Pre-processing) --- */}
-                                <div className="space-y-3 border-t pt-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t.advancedView.preTitle}</span>
-                                        <span className="text-[10px] text-muted-foreground">{t.advancedView.preSub}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-medium">{t.processing.pre.ruby}</span>
-                                            <span className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded">{t.advancedView.resumeBadge}</span>
-                                        </div>
-                                        <Switch checked={fixRuby} onCheckedChange={setFixRuby} />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">{t.processing.pre.rubyDesc}</p>
-                                </div>
-
-                                {/* --- 后处理 (Post-processing) --- */}
-                                <div className="space-y-3 border-t pt-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t.advancedView.postTitle}</span>
-                                        <span className="text-[10px] text-muted-foreground">{t.advancedView.postSub}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-medium">{t.processing.post.punct}</span>
-                                            <span className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded">{t.advancedView.resumeBadge}</span>
-                                        </div>
-                                        <Switch checked={fixPunctuation} onCheckedChange={setFixPunctuation} />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">{t.processing.post.punctDesc}</p>
-
-                                    <div className="flex items-center justify-between mt-3">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-medium">{t.processing.post.kana}</span>
-                                            <span className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded">{t.advancedView.resumeBadge}</span>
-                                        </div>
-                                        <Switch checked={fixKana} onCheckedChange={setFixKana} />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">{t.processing.post.kanaDesc}</p>
-                                </div>
 
                                 <div className="h-2" /> {/* Spacer */}
                             </CardContent>

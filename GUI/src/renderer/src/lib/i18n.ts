@@ -120,7 +120,7 @@ export const translations = {
             pre: {
                 title: '预处理',
                 sub: '（翻译前处理）',
-                ruby: '注音清理 (Ruby Clean)',
+                ruby: '注音清理',
                 rubyDesc: '移除原文中的 Ruby 注音标记（如「漢字《かんじ》」→「漢字」）。'
             },
             post: {
@@ -128,7 +128,7 @@ export const translations = {
                 sub: '（翻译后修正）',
                 punct: '标点规范化',
                 punctDesc: '统一中日标点符号（如全角逗号、句号）。',
-                kana: '假名清理 (Kana Fix)',
+                kana: '假名清理',
                 kanaDesc: '移除译文中残留的孤立日语假名。'
             }
         },

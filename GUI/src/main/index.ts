@@ -359,14 +359,6 @@ ipcMain.handle('retranslate-block', async (_event, { src, modelPath, config }) =
             if (config.ctxSize) args.push('--ctx', config.ctxSize)
             if (config.preset) args.push('--preset', config.preset)
             if (config.temperature) args.push('--temperature', config.temperature.toString())
-            if (config.textProtect) {
-                args.push('--text-protect')
-                if (config.protectPatterns && config.protectPatterns.trim()) {
-                    const patternsPath = join(middlewareDir, 'temp_protect_single.txt')
-                    fs.writeFileSync(patternsPath, config.protectPatterns, 'utf8')
-                    args.push('--protect-patterns', patternsPath)
-                }
-            }
 
             // Glossary
             if (config.glossaryPath) {
@@ -602,7 +594,8 @@ ipcMain.handle('get-hardware-specs', async () => {
 
         const proc = spawn(pythonCmd, ['get_specs.py'], {
             cwd: middlewareDir,
-            shell: false
+            shell: false,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         })
 
         let output = ''
@@ -667,6 +660,52 @@ ipcMain.handle('get-hardware-specs', async () => {
         proc.on('error', (e) => {
             console.error(e)
             resolve(null)
+        })
+    })
+})
+
+ipcMain.handle('test-rules', async (_event, { text, rules }) => {
+    const middlewareDir = getMiddlewarePath()
+    const scriptPath = join(middlewareDir, 'test_rules.py')
+    const pythonCmd = getPythonPath()
+
+    return new Promise((resolve) => {
+        if (!fs.existsSync(scriptPath)) {
+            resolve({ success: false, error: `Test script missing: ${scriptPath}` })
+            return
+        }
+
+        const proc = spawn(pythonCmd, ['test_rules.py'], {
+            cwd: middlewareDir,
+            shell: false,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        })
+
+        let output = ''
+        let errorOutput = ''
+
+        proc.stdout.on('data', (d) => output += d.toString())
+        proc.stderr.on('data', (d) => errorOutput += d.toString())
+
+        // Send data to stdin
+        proc.stdin.write(JSON.stringify({ text, rules }))
+        proc.stdin.end()
+
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                resolve({ success: false, error: `Python error (code ${code}): ${errorOutput}` })
+                return
+            }
+            try {
+                const result = JSON.parse(output)
+                resolve(result)
+            } catch (e) {
+                resolve({ success: false, error: `Invalid JSON from Python: ${output}` })
+            }
+        })
+
+        proc.on('error', (err) => {
+            resolve({ success: false, error: `Failed to spawn: ${err.message}` })
         })
     })
 })
@@ -1100,21 +1139,6 @@ ipcMain.on('start-translation', (event, { inputFile, modelPath, config }) => {
             args.push('--save-summary')
         }
 
-        // [Experimental] Fixer Options
-        if (config.fixRuby) {
-            args.push('--fix-ruby')
-        }
-        if (config.fixKana) {
-            args.push('--fix-kana')
-        }
-        if (config.fixPunctuation) {
-            args.push('--fix-punctuation')
-        }
-
-        // Traditional Chinese Conversion
-        if (config.traditional) {
-            args.push('--traditional')
-        }
 
         // User-defined Rules (written as temp files)
         if (config.rulesPre && config.rulesPre.length > 0) {
@@ -1160,14 +1184,6 @@ ipcMain.on('start-translation', (event, { inputFile, modelPath, config }) => {
         }
 
         // Text Protection (文本保护)
-        if (config.textProtect) {
-            args.push('--text-protect')
-            if (config.protectPatterns && config.protectPatterns.trim()) {
-                const patternsPath = join(middlewareDir, 'temp_protect_batch.txt')
-                fs.writeFileSync(patternsPath, config.protectPatterns, 'utf8')
-                args.push('--protect-patterns', patternsPath)
-            }
-        }
 
         // Dynamic Retry Strategy (动态重试策略)
         if (config.retryTempBoost !== undefined) {
@@ -1207,7 +1223,7 @@ ipcMain.on('start-translation', (event, { inputFile, modelPath, config }) => {
     try {
         pythonProcess = spawn(pythonCmd, args, {
             cwd: middlewareDir,
-            env: env,
+            env: { ...env, PYTHONIOENCODING: 'utf-8' },
             // shell: true, // REMOVED: Shell causes PID mismatch, preventing kill
             stdio: ['ignore', 'pipe', 'pipe']
         })

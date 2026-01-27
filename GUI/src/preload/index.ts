@@ -55,6 +55,9 @@ const api = {
 
     // External Links
     openExternal: (url: string) => ipcRenderer.send('open-external', url),
+
+    // Rule System
+    testRules: (text: string, rules: any[]) => ipcRenderer.invoke('test-rules', { text, rules }),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
