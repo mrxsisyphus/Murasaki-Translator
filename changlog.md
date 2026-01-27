@@ -1,5 +1,15 @@
 # Murasaki Translator - Changelog
 
+## [1.1.2] - 2026-01-27
+
+### 续传逻辑重构与重复修复 (Resume Logic Refactor)
+- **GUI**: 删除了高级设置中的“增量翻译”开关。现在统一由文件检测逻辑驱动，操作更简便。
+- **Middleware**: 修复了追加模式下可能导致输出内容重复写入的 Bug。
+- **Middleware**: 优化了 `calculate_skip_blocks` 算法，采用精确行数判定，确保续传时的数据完整性。
+- **Middleware**: 修正了从现有文件启动翻译时的进度计数逻辑，现在初始进度显示更加准确。
+
+---
+
 ## [1.1.1] - 2026-01-27
 
 ###  核心架构重构 (Core Architecture)
