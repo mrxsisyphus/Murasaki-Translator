@@ -157,6 +157,31 @@ const getPythonPath = () => {
     return join(process.resourcesPath, 'python_env', 'Scripts', 'python.exe')
 }
 
+// Helper to spawn Python process with sanitized environment
+const spawnPythonProcess = (
+    cmd: string,
+    args: string[],
+    options: { cwd: string, env?: NodeJS.ProcessEnv, stdio?: any }
+) => {
+    // 1. Base Environment
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        ...options.env, // Merge user provided env (e.g. CUDA_VISIBLE_DEVICES)
+        PYTHONIOENCODING: 'utf-8'
+    }
+
+    // 2. Sanitation: Remove system-wide Python paths
+    delete env['PYTHONHOME']
+    delete env['PYTHONPATH']
+
+    console.log(`[Spawn] ${cmd} ${args[0]}... (Env Sanitized)`)
+
+    return spawn(cmd, args, {
+        ...options,
+        env
+    })
+}
+
 // Helper for User Mutable Data (Models, Glossaries)
 // Reverted to Self-Contained (User Request):
 // In Prod: resources/middleware (Same as binary)
@@ -443,10 +468,10 @@ ipcMain.handle('get-hardware-specs', async () => {
             return
         }
 
-        const proc = spawn(pythonCmd, ['get_specs.py'], {
+        const proc = spawnPythonProcess(pythonCmd, ['get_specs.py'], {
             cwd: middlewareDir,
-            shell: false,
-            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+            // shell: false, // Default is false in helper
+            // env merged in helper
         })
 
         let output = ''
@@ -526,10 +551,9 @@ ipcMain.handle('test-rules', async (_event, { text, rules }) => {
             return
         }
 
-        const proc = spawn(pythonCmd, ['test_rules.py'], {
+        const proc = spawnPythonProcess(pythonCmd, ['test_rules.py'], {
             cwd: middlewareDir,
-            shell: false,
-            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+            // env merged in helper
         })
 
         let output = ''
@@ -725,8 +749,8 @@ ipcMain.handle('rebuild-doc', async (_event, { cachePath, outputPath }) => {
         console.log('[Rebuild] Executing:', pythonCmd, args.join(' '))
 
         return new Promise((resolve) => {
-            const { spawn } = require('child_process')
-            const proc = spawn(pythonCmd, args, { cwd: middlewareDir })
+            // const { spawn } = require('child_process') // Use global spawnPythonProcess
+            const proc = spawnPythonProcess(pythonCmd, args, { cwd: middlewareDir })
 
             let errorOutput = ''
             proc.stderr.on('data', (data: Buffer) => {
@@ -838,9 +862,9 @@ ipcMain.handle('retranslate-block', async (event, { src, index, modelPath, confi
     console.log('[Retranslate] Spawning:', pythonCmd, args.join(' '))
 
     return new Promise((resolve) => {
-        const proc = spawn(pythonCmd, args, {
+        const proc = spawnPythonProcess(pythonCmd, args, {
             cwd: middlewareDir,
-            env: { ...process.env, PYTHONIOENCODING: 'utf-8', CUDA_VISIBLE_DEVICES: config?.gpuDeviceId },
+            env: { CUDA_VISIBLE_DEVICES: config?.gpuDeviceId }, // Only pass custom vars, helper merges process.env and sanitizes
             stdio: ['ignore', 'pipe', 'pipe']
         })
 
@@ -1275,26 +1299,19 @@ ipcMain.on('start-translation', (event, { inputFile, modelPath, config }) => {
     event.reply('log-update', `System: CWD: ${middlewareDir}`)
     event.reply('log-update', `System: Config - CTX: ${config?.ctxSize || '8192'}, Concurrency: ${config?.concurrency || '1'}, KV: ${config?.kvCacheType || 'f16'}`)
 
-    const env = { ...process.env }
-
-    // [Fix] Remove system-wide Python paths to prevent pollution of bundled environment
-    // This is critical for users who have other Python versions installed globally
-    delete env['PYTHONHOME']
-    delete env['PYTHONPATH']
-    console.log('Sanitized Environment: Removed PYTHONHOME/PYTHONPATH')
 
     // Set GPU ID if specified and not in CPU mode
+    let customEnv: NodeJS.ProcessEnv = {}
     if (config?.deviceMode !== 'cpu' && config?.gpuDeviceId) {
-        env['CUDA_VISIBLE_DEVICES'] = config.gpuDeviceId
+        customEnv['CUDA_VISIBLE_DEVICES'] = config.gpuDeviceId
         console.log(`Setting CUDA_VISIBLE_DEVICES=${config.gpuDeviceId}`)
         event.reply('log-update', `System: CUDA_VISIBLE_DEVICES=${config.gpuDeviceId}`)
     }
 
     try {
-        pythonProcess = spawn(pythonCmd, args, {
+        pythonProcess = spawnPythonProcess(pythonCmd, args, {
             cwd: middlewareDir,
-            env: { ...env, PYTHONIOENCODING: 'utf-8' },
-            // shell: true, // REMOVED: Shell causes PID mismatch, preventing kill
+            env: customEnv,
             stdio: ['ignore', 'pipe', 'pipe']
         })
 
