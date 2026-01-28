@@ -113,10 +113,15 @@ class InferenceEngine:
         atexit.register(self.stop_server)
         self._wait_for_ready()
         
-    def _wait_for_ready(self, timeout=60):
+    def _wait_for_ready(self, timeout=180):
         logger.info("Waiting for server to be ready...")
         start = time.time()
         while time.time() - start < timeout:
+            # Failsafe: Check if process died
+            if self.process.poll() is not None:
+                logger.error(f"Server process terminated unexpectedly with code {self.process.returncode}")
+                break
+
             try:
                 # 使用标准健康检查接口
                 resp = self.session.get(f"{self.base_url}/v1/models", timeout=5)
