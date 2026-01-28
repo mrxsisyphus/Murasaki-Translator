@@ -1387,9 +1387,7 @@ ipcMain.on('stop-translation', () => {
 
         pythonProcess = null
 
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('process-exit', -1)
-        }
+
         console.log('[Stop] Translation process stopped signal sent')
     }
 })

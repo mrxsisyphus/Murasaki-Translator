@@ -6,7 +6,7 @@ import { getVariants } from "../lib/utils"
 import { identifyModel } from "../lib/modelConfig"
 import { addRecord, updateRecord, TranslationRecord, TriggerEvent } from "./HistoryView"
 
-import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, Brush } from 'recharts'
 import { HardwareMonitorBar, MonitorData } from "./HardwareMonitorBar"
 import { AlertModal } from "./ui/AlertModal"
 import { useAlertModal } from "../hooks/useAlertModal"
@@ -125,6 +125,18 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
     const [displayElapsed, setDisplayElapsed] = useState(0) // 本地平滑计时（基于后端数据）
     const [displayRemaining, setDisplayRemaining] = useState(0) // 本地平滑倒计时
     const [chartData, setChartData] = useState<any[]>([])
+    const [chartMode, setChartMode] = useState<'chars' | 'tokens' | 'vram' | 'gpu'>('chars')
+    // Use Ref to access current chartMode inside onLogUpdate closure
+    const chartModeRef = useRef(chartMode)
+    useEffect(() => { chartModeRef.current = chartMode }, [chartMode])
+
+    // Multi-metric chart histories
+    const chartHistoriesRef = useRef<{
+        chars: { time: number; value: number }[],
+        tokens: { time: number; value: number }[],
+        vram: { time: number; value: number }[],
+        gpu: { time: number; value: number }[]
+    }>({ chars: [], tokens: [], vram: [], gpu: [] })
     // New Block-Based Preview State
     const [previewBlocks, setPreviewBlocks] = useState<Record<number, { src: string, output: string }>>({})
 
@@ -255,7 +267,30 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
 
                 if (log.startsWith("JSON_MONITOR:")) {
                     try {
-                        setMonitorData(JSON.parse(log.substring("JSON_MONITOR:".length)))
+                        const monitorPayload = JSON.parse(log.substring("JSON_MONITOR:".length))
+                        setMonitorData(monitorPayload)
+                        // Push to chart histories for VRAM and GPU
+                        const now = Date.now()
+                        if (typeof monitorPayload.vram_percent === 'number') {
+                            chartHistoriesRef.current.vram = [...chartHistoriesRef.current.vram, { time: now, value: monitorPayload.vram_percent }].slice(-100000)
+                        }
+                        if (typeof monitorPayload.gpu_util === 'number') {
+                            chartHistoriesRef.current.gpu = [...chartHistoriesRef.current.gpu, { time: now, value: monitorPayload.gpu_util }].slice(-100000)
+                        }
+                        // Use real-time speeds from monitor if available (0.5s update rate)
+                        if (typeof monitorPayload.realtime_speed_chars === 'number') {
+                            chartHistoriesRef.current.chars = [...chartHistoriesRef.current.chars, { time: now, value: monitorPayload.realtime_speed_chars }].slice(-100000)
+                        }
+                        if (typeof monitorPayload.realtime_speed_tokens === 'number') {
+                            chartHistoriesRef.current.tokens = [...chartHistoriesRef.current.tokens, { time: now, value: monitorPayload.realtime_speed_tokens }].slice(-100000)
+                        }
+                        // Update chartData immediately if in relevant mode
+                        const currentMode = chartModeRef.current
+                        const activeHistory = chartHistoriesRef.current[currentMode]
+                        // Downsample for performance (Max 1000 points visible)
+                        const step = Math.ceil(activeHistory.length / 1000)
+                        const dataset = step > 1 ? activeHistory.filter((_, i) => i % step === 0) : activeHistory
+                        setChartData(dataset.map(h => ({ time: h.time, speed: h.value })))
                     } catch (e) { console.error("Monitor Parse Error:", e) }
                     return
                 }
@@ -296,9 +331,19 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                                 : progressDataRef.current.speeds
                         }
 
-                        if (data.speed_chars > 0) {
-                            setChartData(prev => [...prev, { time: Date.now(), speed: data.speed_chars }].slice(-50))
+                        // Update legacy values only if chart history is empty (fallback)
+                        // The primary chart driver is now JSON_MONITOR
+                        const now = Date.now()
+                        if (chartHistoriesRef.current.chars.length === 0 && data.speed_chars > 0) {
+                            chartHistoriesRef.current.chars.push({ time: now, value: data.speed_chars })
                         }
+                        // Update chartData based on current mode (Use Ref to avoid closure trap)
+                        const currentMode = chartModeRef.current
+                        const activeHistory = chartHistoriesRef.current[currentMode as keyof typeof chartHistoriesRef.current]
+                        // Downsample for performance
+                        const step = Math.ceil(activeHistory.length / 1000)
+                        const dataset = step > 1 ? activeHistory.filter((_, i) => i % step === 0) : activeHistory
+                        setChartData(dataset.map(h => ({ time: h.time, speed: h.value })))
                     } catch (e) { console.error(e) }
                 } else if (log.startsWith("JSON_RETRY:")) {
                     try {
@@ -516,6 +561,14 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
     }, [progress.elapsed])
 
+    // Refresh chart data when mode changes
+    useEffect(() => {
+        const activeHistory = chartHistoriesRef.current[chartMode]
+        const step = Math.ceil(activeHistory.length / 1000)
+        const dataset = step > 1 ? activeHistory.filter((_, i) => i % step === 0) : activeHistory
+        setChartData(dataset.map(h => ({ time: h.time, speed: h.value })))
+    }, [chartMode])
+
     const handleAddFiles = async () => {
         const files = await window.api?.selectFiles()
         if (files?.length) setFileQueue(prev => [...prev, ...files.filter((f: string) => !prev.includes(f))])
@@ -539,6 +592,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         hasReceivedProgressRef.current = false
 
         setChartData([])
+        chartHistoriesRef.current = { chars: [], tokens: [], vram: [], gpu: [] }
         setProgress({ current: 0, total: 0, percent: 0, elapsed: 0, remaining: 0, speedLines: 0, speedChars: 0, speedEval: 0, speedGen: 0, retries: 0 })
         setPreviewBlocks({})
         localStorage.removeItem("last_preview_blocks") // Clear persisted preview
@@ -1240,23 +1294,35 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                         </div>
 
                         {/* Right: Enhanced Speed Chart (65%) */}
-                        <div className="lg:w-[65%] bg-card rounded-lg border border-border/50 overflow-hidden flex flex-col h-[180px]">
+                        <div className="lg:w-[65%] bg-card rounded-lg border border-border/50 overflow-hidden flex flex-col">
                             <div className="py-1.5 px-3 border-b border-border/30 shrink-0 flex items-center justify-between">
                                 <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">{t.dashboard.speedChart}</span>
-                                <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
-                                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500"></span>{t.dashboard.charPerSec}</span>
+                                <div className="flex items-center gap-2">
+                                    <div className="relative">
+                                        <select
+                                            value={chartMode}
+                                            onChange={(e) => setChartMode(e.target.value as any)}
+                                            className="appearance-none bg-accent/50 border border-border/50 rounded px-2 py-0.5 text-[9px] font-medium text-foreground pr-5 focus:outline-none hover:bg-accent cursor-pointer"
+                                        >
+                                            <option value="chars">{t.dashboard.charPerSec}</option>
+                                            <option value="tokens">Tokens/s</option>
+                                            <option value="vram">VRAM %</option>
+                                            <option value="gpu">GPU %</option>
+                                        </select>
+                                        <ChevronDown className="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                    </div>
                                 </div>
                             </div>
                             {/* 固定高度容器，彻底解决 ResponsiveContainer 的 0 尺寸报错 */}
-                            <div style={{ width: '100%', height: '140px', position: 'relative', padding: '8px' }}>
+                            <div style={{ width: '100%', flex: 1, position: 'relative', minHeight: '180px' }}>
                                 {chartData.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                                             <defs>
                                                 <linearGradient id="colorSpeedGradient" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                                                    <stop offset="50%" stopColor="#a78bfa" stopOpacity={0.2} />
-                                                    <stop offset="100%" stopColor="#c4b5fd" stopOpacity={0.05} />
+                                                    <stop offset="0%" stopColor={chartMode === 'vram' || chartMode === 'gpu' ? '#f59e0b' : chartMode === 'tokens' ? '#10b981' : '#8b5cf6'} stopOpacity={0.4} />
+                                                    <stop offset="50%" stopColor={chartMode === 'vram' || chartMode === 'gpu' ? '#fbbf24' : chartMode === 'tokens' ? '#34d399' : '#a78bfa'} stopOpacity={0.2} />
+                                                    <stop offset="100%" stopColor={chartMode === 'vram' || chartMode === 'gpu' ? '#fde68a' : chartMode === 'tokens' ? '#6ee7b7' : '#c4b5fd'} stopOpacity={0.05} />
                                                 </linearGradient>
                                             </defs>
                                             <XAxis dataKey="time" hide />
@@ -1264,27 +1330,37 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                                                 contentStyle={{
                                                     backgroundColor: 'rgba(37, 37, 53, 0.95)',
                                                     borderRadius: '10px',
-                                                    border: '1px solid rgba(139, 92, 246, 0.3)',
+                                                    border: `1px solid ${chartMode === 'vram' || chartMode === 'gpu' ? 'rgba(245, 158, 11, 0.3)' : chartMode === 'tokens' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(139, 92, 246, 0.3)'}`,
                                                     boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                                                     color: '#cdd6f4',
                                                     fontSize: '11px',
                                                     padding: '8px 12px'
                                                 }}
-                                                formatter={(value: any) => [`${value} ${t.dashboard.charPerSec}`, t.dashboard.speed]}
+                                                formatter={(value: any) => [
+                                                    `${value} ${chartMode === 'vram' || chartMode === 'gpu' ? '%' : chartMode === 'tokens' ? 't/s' : t.dashboard.charPerSec}`,
+                                                    chartMode === 'vram' ? 'VRAM' : chartMode === 'gpu' ? 'GPU' : chartMode === 'tokens' ? 'Token Speed' : t.dashboard.speed
+                                                ]}
                                                 labelFormatter={() => ''}
                                             />
                                             <Area
-                                                type="monotoneX"
+                                                type="monotone"
                                                 dataKey="speed"
-                                                stroke="#8b5cf6"
-                                                strokeWidth={2.5}
-                                                fillOpacity={1}
+                                                stroke={chartMode === 'vram' || chartMode === 'gpu' ? '#f59e0b' : chartMode === 'tokens' ? '#10b981' : '#8b5cf6'}
+                                                strokeWidth={2}
                                                 fill="url(#colorSpeedGradient)"
-                                                animationDuration={200}
-                                                dot={false}
+                                                isAnimationActive={false}
+                                            />
+                                            <Brush
+                                                dataKey="time"
+                                                height={12}
+                                                stroke="rgba(120, 120, 120, 0.15)"
+                                                fill="transparent"
+                                                tickFormatter={() => ''}
+                                                travellerWidth={6}
                                             />
                                         </AreaChart>
                                     </ResponsiveContainer>
+
                                 ) : (
                                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground/30 text-[10px] space-y-1">
                                         <Zap className="w-5 h-5 opacity-20" />
@@ -1306,10 +1382,10 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                         {renderBlockAlignedPreview()}
                     </div>
                 </div>
-            </div>
+            </div >
 
             {/* BOTTOM: Control Bar + Logs Drawer */}
-            <div className={`${logsCollapsed ? 'h-[50px]' : 'h-[180px]'} shrink-0 bg-card/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.1)] transition-all duration-300 flex flex-col`}>
+            < div className={`${logsCollapsed ? 'h-[50px]' : 'h-[180px]'} shrink-0 bg-card/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.1)] transition-all duration-300 flex flex-col`}>
                 <div className="h-[50px] px-4 flex items-center justify-between shrink-0 border-b border-border/30">
                     <div className="flex items-center gap-3">
                         <Button size="icon" onClick={handleStartQueue} disabled={!canStart || needsModel} className={`rounded-full w-9 h-9 shadow-md transition-all ${!canStart || needsModel ? 'bg-muted text-muted-foreground' : 'bg-gradient-to-br from-purple-600 to-indigo-600 hover:scale-105'}`}>
@@ -1344,50 +1420,54 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                     </div>
                 </div>
 
-                {!logsCollapsed && (
-                    <div className="flex-1 overflow-y-auto px-4 py-2 font-mono text-[10px] text-muted-foreground bg-secondary/20">
-                        {logs.length === 0 ? (
-                            <span className="italic opacity-50">{t.dashboard.waitingLog}</span>
-                        ) : (
-                            logs
-                                .filter(log => !log.includes("STDERR") && !log.includes("ggml") && !log.includes("llama_"))
-                                .slice(-100)
-                                .map((log, i) => <div key={i} className="py-0.5 border-b border-border/5 last:border-0">{log}</div>)
-                        )}
-                        <div ref={logEndRef} />
-                    </div>
-                )}
-            </div>
+                {
+                    !logsCollapsed && (
+                        <div className="flex-1 overflow-y-auto px-4 py-2 font-mono text-[10px] text-muted-foreground bg-secondary/20">
+                            {logs.length === 0 ? (
+                                <span className="italic opacity-50">{t.dashboard.waitingLog}</span>
+                            ) : (
+                                logs
+                                    .filter(log => !log.includes("STDERR") && !log.includes("ggml") && !log.includes("llama_"))
+                                    .slice(-100)
+                                    .map((log, i) => <div key={i} className="py-0.5 border-b border-border/5 last:border-0">{log}</div>)
+                            )}
+                            <div ref={logEndRef} />
+                        </div>
+                    )
+                }
+            </div >
 
             {/* Confirmation Modal for Overwrite/Resume */}
-            {confirmModal && confirmModal.isOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-                    <Card className="w-[400px] max-w-[90vw] shadow-lg border-border bg-background animate-in zoom-in-95 duration-200">
-                        <div className="p-6">
-                            <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                                <AlertTriangle className="w-5 h-5 text-amber-500" />
-                                {t.dashboard.fileExistTitle}
-                            </h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                {t.dashboard.fileExistMsg} <span className="font-mono text-xs bg-muted px-1 rounded">{confirmModal.file}</span>
-                            </p>
-                            <div className="flex flex-col gap-2">
-                                <Button onClick={confirmModal.onResume} className="w-full justify-center group h-auto py-2.5">
-                                    <span className="font-medium">{t.dashboard.resume}</span>
-                                </Button>
-                                <Button onClick={confirmModal.onOverwrite} variant="secondary" className="w-full justify-center h-auto py-2.5 hover:bg-destructive/10 hover:text-destructive">
-                                    <span className="font-medium">{t.dashboard.overwrite}</span>
-                                </Button>
-                                <Button onClick={confirmModal.onCancel} variant="ghost" className="w-full">
-                                    {t.dashboard.cancel}
-                                </Button>
+            {
+                confirmModal && confirmModal.isOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+                        <Card className="w-[400px] max-w-[90vw] shadow-lg border-border bg-background animate-in zoom-in-95 duration-200">
+                            <div className="p-6">
+                                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
+                                    <AlertTriangle className="w-5 h-5 text-amber-500" />
+                                    {t.dashboard.fileExistTitle}
+                                </h3>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    {t.dashboard.fileExistMsg} <span className="font-mono text-xs bg-muted px-1 rounded">{confirmModal.file}</span>
+                                </p>
+                                <div className="flex flex-col gap-2">
+                                    <Button onClick={confirmModal.onResume} className="w-full justify-center group h-auto py-2.5">
+                                        <span className="font-medium">{t.dashboard.resume}</span>
+                                    </Button>
+                                    <Button onClick={confirmModal.onOverwrite} variant="secondary" className="w-full justify-center h-auto py-2.5 hover:bg-destructive/10 hover:text-destructive">
+                                        <span className="font-medium">{t.dashboard.overwrite}</span>
+                                    </Button>
+                                    <Button onClick={confirmModal.onCancel} variant="ghost" className="w-full">
+                                        {t.dashboard.cancel}
+                                    </Button>
+                                </div>
                             </div>
-                        </div>
-                    </Card>
-                </div>
-            )}
+                        </Card>
+                    </div>
+                )
+            }
 
             <AlertModal {...alertProps} />
-        </div>
+        </div >
     )
 })

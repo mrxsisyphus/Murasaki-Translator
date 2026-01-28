@@ -1039,11 +1039,53 @@ def main():
             
             # Start Monitor Thread
             def run_monitor_loop():
+                # Correctly initialize baseline to avoid initial speed spike
+                try:
+                    # Initialize baseline from ENGINE DIRECTLY (Fail-safe)
+                    last_chars = engine.generated_chars_count
+                    last_tokens = engine.generated_tokens_count
+                except:
+                    last_chars = 0
+                    last_tokens = 0
+                
+                last_check_time = time.time()
+                
                 while True:
-                    status = monitor.get_status()
+                    # Get Hardware Status (VRAM/GPU)
+                    status = monitor.get_status() or {}
+                    
+                    # Get Engine Metrics (KV Cache)
+                    # Get Engine Metrics (KV Cache) - HTTP Request
+                    try:
+                        metrics = engine.get_metrics()
+                        if metrics:
+                            status.update(metrics)
+                    except: pass
+
+                    # Calculate Instantaneous Speed (Real-time) - Direct Memory Access
+                    # Decoupled from HTTP request stability
+                    try:
+                        curr_chars = engine.generated_chars_count
+                        curr_tokens = engine.generated_tokens_count
+                        now = time.time()
+                        dt = now - last_check_time
+                        
+                        if dt > 0.4: # Update every ~0.5s
+                             speed_c = int((curr_chars - last_chars) / dt)
+                             speed_t = round((curr_tokens - last_tokens) / dt, 1)
+                             status['realtime_speed_chars'] = speed_c if speed_c > 0 else 0
+                             status['realtime_speed_tokens'] = speed_t if speed_t > 0 else 0
+                             
+                             last_chars = curr_chars
+                             last_tokens = curr_tokens
+                             last_check_time = now
+                    except Exception as e:
+                        # Should rarely happen
+                        pass
+                    
                     if status:
                         safe_print_json("JSON_MONITOR", status)
-                    time.sleep(2.0)
+                    time.sleep(0.5) # Fast update for smooth charts
             
             monitor_thread = threading.Thread(target=run_monitor_loop, daemon=True)
             monitor_thread.start()
@@ -1231,6 +1273,7 @@ def main():
 
             def restore_block_task(block_idx: int, stored_result: Dict):
                 """Dummy task to restore pre-calculated result immediately."""
+                stored_result["is_restorer"] = True
                 return stored_result
 
             
@@ -1342,6 +1385,10 @@ def main():
             completed_count = 0 
             effective_completed = 0
             
+            # Session Stats for real-time speed (excluding restored blocks)
+            session_out_chars = 0
+            session_out_lines = 0 
+            
             # Main result processing loop
             for future in as_completed(future_to_index):
                     block_idx = future_to_index[future]
@@ -1368,9 +1415,18 @@ def main():
                         total_out_chars += len(result["out_text"])
                         total_lines += result["lines_count"]
                         total_cot_chars += result["cot_chars"]
-                        if result.get("usage"):
-                            total_prompt_tokens += result["usage"].get("prompt_tokens", 0)
-                            total_gen_tokens += result["usage"].get("completion_tokens", 0)
+                        
+                        # Fix for Resume Mode Speed Spike:
+                        # Only count stats for REAL GEN tasks towards speed calculation
+                        # "is_restorer" results are instant and distort the speed metric
+                        is_generated_block = not result.get("is_restorer", False)
+                        if is_generated_block:
+                            session_out_chars += (len(result["out_text"]) + result.get("cot_chars", 0))
+                            session_out_lines += result.get("lines_count", 0)
+                            if result.get("usage"):
+                                total_prompt_tokens += result["usage"].get("prompt_tokens", 0)
+                                total_gen_tokens += result["usage"].get("completion_tokens", 0)
+                            
                         
                         if block_idx not in precalculated_temp:
                             try:
@@ -1386,8 +1442,11 @@ def main():
                         
                         # Progress reporting
                         elapsed_so_far = max(0.1, time.time() - start_time)
-                        current_speed_chars = (total_out_chars + total_cot_chars) / elapsed_so_far
-                        avg_time_per_block = elapsed_so_far / completed_count
+                        
+                        # Speed Calculation uses SESSION stats only
+                        current_speed_chars = session_out_chars / elapsed_so_far
+                        
+                        avg_time_per_block = elapsed_so_far / max(1, completed_count)
                         remaining_time = (total_tasks_count - completed_count) * avg_time_per_block
                         
                         progress_data = {
@@ -1396,7 +1455,7 @@ def main():
                             "percent": ((effective_completed + len([idx for idx in range(skip_blocks_from_output) if blocks[idx].prompt_text.strip()])) / max(1, effective_total)) * 100,
                             "total_chars": total_out_chars, "total_lines": total_lines,
                             "source_chars": total_source_chars, "source_lines": total_source_lines, 
-                            "speed_chars": round(current_speed_chars, 1), "speed_lines": round(total_lines / elapsed_so_far, 2),
+                            "speed_chars": round(current_speed_chars, 1), "speed_lines": round(session_out_lines / elapsed_so_far, 2),
                             "speed_gen": round(total_gen_tokens / elapsed_so_far, 1), "speed_eval": round(total_prompt_tokens / elapsed_so_far, 1),
                             "total_tokens": total_gen_tokens, "elapsed": elapsed_so_far, "remaining": int(remaining_time)
                         }
