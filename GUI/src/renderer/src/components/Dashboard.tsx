@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, forwardRef, useImperativeHandle } from "react"
-import { Play, X, FolderOpen, FileText, BookOpen, Clock, Zap, Layers, Terminal, ChevronDown, Plus, FolderPlus, Trash2, FileCheck, ArrowRight, AlertTriangle, GripVertical, RefreshCw, AlignLeft } from "lucide-react"
+import { Play, X, FolderOpen, FileText, BookOpen, Clock, Zap, Layers, Terminal, ChevronDown, Plus, FolderPlus, Trash2, ArrowRight, AlertTriangle, GripVertical, RefreshCw, AlignLeft } from "lucide-react"
 import { Button, Card, Tooltip as UITooltip } from "./ui/core"
 import { translations, Language } from "../lib/i18n"
 import { getVariants } from "../lib/utils"
@@ -10,24 +10,74 @@ import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, Brush } from 'rec
 import { HardwareMonitorBar, MonitorData } from "./HardwareMonitorBar"
 import { AlertModal } from "./ui/AlertModal"
 import { useAlertModal } from "../hooks/useAlertModal"
+import { FileIcon } from "./ui/FileIcon"
+import { QueueItem, generateId, getFileType } from "../types/common"
 
 // Window.api type is defined in src/types/api.d.ts
 
 interface DashboardProps {
     lang: Language
     active?: boolean
+    onRunningChange?: (isRunning: boolean) => void
 }
 
-export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref) => {
+export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunningChange }, ref) => {
     const t = translations[lang]
 
-    // Queue System (从 localStorage 恢复)
-    const [fileQueue, setFileQueue] = useState<string[]>(() => {
-        const saved = localStorage.getItem("file_queue")
-        return saved ? JSON.parse(saved) : []
+    // Queue System (Synced with LibraryView)
+    const [queue, setQueue] = useState<QueueItem[]>(() => {
+        try {
+            const saved = localStorage.getItem("library_queue")
+            if (saved) return JSON.parse(saved)
+        } catch (e) { console.error("Failed to load queue:", e) }
+
+        // Legacy fallback
+        try {
+            const legacy = localStorage.getItem("file_queue")
+            if (legacy) {
+                const paths = JSON.parse(legacy) as string[]
+                return paths.map(path => ({
+                    id: generateId(),
+                    path,
+                    fileName: path.split(/[/\\]/).pop() || path,
+                    fileType: getFileType(path),
+                    addedAt: new Date().toISOString(),
+                    config: { useGlobalDefaults: true },
+                    status: 'pending' as const
+                })) as QueueItem[]
+            }
+        } catch (e) { }
+        return []
     })
+
+    // Sync verification on active
+    useEffect(() => {
+        if (active) {
+            try {
+                const saved = localStorage.getItem("library_queue")
+                if (saved) {
+                    const loaded = JSON.parse(saved)
+                    setQueue(loaded)
+
+                    // Sync completed files set from queue status
+                    const completed = new Set<string>()
+                    loaded.forEach((item: QueueItem) => {
+                        if (item.status === 'completed') completed.add(item.path)
+                    })
+                    setCompletedFiles(completed)
+                }
+            } catch (e) { }
+        }
+    }, [active])
+
+    // Persistence
+    useEffect(() => {
+        localStorage.setItem("library_queue", JSON.stringify(queue))
+        localStorage.setItem("file_queue", JSON.stringify(queue.map(q => q.path)))
+    }, [queue])
+
     const [currentQueueIndex, setCurrentQueueIndex] = useState(-1)
-    const [completedFiles, setCompletedFiles] = useState<Set<string>>(new Set()) // 追踪已完成的文件
+    const [completedFiles, setCompletedFiles] = useState<Set<string>>(new Set())
 
     // Monitors
     const [monitorData, setMonitorData] = useState<MonitorData | null>(null)
@@ -37,8 +87,9 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
     const [models, setModels] = useState<string[]>([])
     const [modelsInfoMap, setModelsInfoMap] = useState<Record<string, { paramsB?: number, sizeGB?: number }>>({})
 
-    const [modelInfo, setModelInfo] = useState<any>(null)
-    const { alertProps, showAlert } = useAlertModal()
+    const modelInfoRef = useRef<any>(null) // Added for modelInfoRef.current
+    const modelInfo = modelInfoRef.current
+    const { alertProps, showAlert, showConfirm } = useAlertModal()
 
     const fetchData = async () => {
         const m = await window.api?.getModels()
@@ -68,15 +119,15 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                 // 每次进入时都主动获取模型详细信息
                 window.api?.getModelInfo(path).then(info => {
                     if (info) {
-                        setModelInfo({ ...info, name: name, path: path })
+                        modelInfoRef.current = { ...info, name: name, path: path }
                     } else {
-                        setModelInfo({ name: name, path: path })
+                        modelInfoRef.current = { name: name, path: path }
                     }
                 }).catch(() => {
-                    setModelInfo({ name: name, path: path })
+                    modelInfoRef.current = { name: name, path: path }
                 })
             } else {
-                setModelInfo(null)
+                modelInfoRef.current = null
                 setModelPath("")
             }
         }
@@ -88,6 +139,13 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
     const [alignmentMode, setAlignmentMode] = useState(() => localStorage.getItem("config_alignment_mode") === "true")
 
     const [isRunning, setIsRunning] = useState(false)
+
+    // Sync running state
+    useEffect(() => {
+        onRunningChange?.(isRunning)
+    }, [isRunning, onRunningChange])
+
+    const [isReordering, setIsReordering] = useState(false)
     const [logs, setLogs] = useState<string[]>([])
 
 
@@ -97,11 +155,12 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
     const logEndRef = useRef<HTMLDivElement>(null)
     const srcPreviewRef = useRef<HTMLDivElement>(null)
     const outPreviewRef = useRef<HTMLDivElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
     const isAutoScrolling = useRef(false)
 
     // Refs for stable IPC callbacks
     const currentQueueIndexRef = useRef(currentQueueIndex)
-    const fileQueueRef = useRef(fileQueue)
+    const queueRef = useRef(queue)
     const currentRecordIdRef = useRef<string | null>(null)
     const logsBufferRef = useRef<string[]>([])
     const triggersBufferRef = useRef<TriggerEvent[]>([])
@@ -111,8 +170,8 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         total: 0, current: 0, lines: 0, chars: 0, sourceLines: 0, sourceChars: 0, outputPath: '', speeds: []
     })
 
-    // Ref to hold the fresh prepareAndCheck function (avoids closure stale state in handleProcessExit)
-    const prepareAndCheckRef = useRef<(inputPath: string, index: number) => Promise<void>>(() => Promise.resolve())
+    // Ref to hold the fresh checkAndStart function (avoids closure stale state in handleProcessExit)
+    const checkAndStartRef = useRef<(inputPath: string, index: number) => Promise<void>>(() => Promise.resolve())
 
     // Auto-scroll ref
     const activeQueueItemRef = useRef<HTMLDivElement>(null)
@@ -156,7 +215,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
 
     useEffect(() => {
         if (modelPath) {
-            window.api?.getModelInfo(modelPath).then(info => setModelInfo(info))
+            window.api?.getModelInfo(modelPath).then(info => modelInfoRef.current = info)
 
             // 检查是否为官方模型，显示识别信息
             const config = identifyModel(modelPath)
@@ -166,11 +225,12 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
     }, [modelPath])
 
-    // 保存队列到 localStorage
+    // Confirm sync with file_queue for legacy
     useEffect(() => {
-        localStorage.setItem("file_queue", JSON.stringify(fileQueue))
-        fileQueueRef.current = fileQueue
-    }, [fileQueue])
+        // We might want to keep file_queue synced in case other parts use it, 
+        // but library_queue is the master.
+        queueRef.current = queue
+    }, [queue])
 
     // Sync queue index ref
     useEffect(() => {
@@ -224,24 +284,27 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
 
         // Use refs for stable access to current values
         const queueIndex = currentQueueIndexRef.current
-        const queue = fileQueueRef.current
+        const queue = queueRef.current
 
         if (success && queueIndex < queue.length - 1) {
-            // Mark current file as completed
-            setCompletedFiles(prev => new Set(prev).add(queue[queueIndex]))
+            // Mark current file as completed locally and in persistent queue
+            setCompletedFiles(prev => new Set(prev).add(queue[queueIndex].path))
+            setQueue(prev => prev.map((item, i) => i === queueIndex ? { ...item, status: 'completed' } : item))
+
             // Continue with next file in queue
             const nextIndex = queueIndex + 1
 
             // IMPORTANT: Use prepareAndCheckRef to perform existence check before overwriting!
             // Do not startTranslation directly. This avoids the stale closure bug and unintentional overwrites.
             setTimeout(() => {
-                prepareAndCheckRef.current(queue[nextIndex], nextIndex)
+                checkAndStartRef.current(queue[nextIndex].path, nextIndex)
             }, 1000)
         } else {
             // All done or stopped
             if (success && queueIndex >= 0 && queue[queueIndex]) {
-                // Mark last file as completed
-                setCompletedFiles(prev => new Set(prev).add(queue[queueIndex]))
+                // Mark last file as completed locally and in persistent queue
+                setCompletedFiles(prev => new Set(prev).add(queue[queueIndex].path))
+                setQueue(prev => prev.map((item, i) => i === queueIndex ? { ...item, status: 'completed' } : item))
             }
             setCurrentQueueIndex(-1)
             if (success && queue.length > 1) {
@@ -470,7 +533,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
 
             if (e.ctrlKey && e.key === 'Enter') {
                 e.preventDefault()
-                if (!isRunning && fileQueue.length > 0) handleStartQueue()
+                if (!isRunning && queue.length > 0) handleStartQueue()
             } else if (e.key === 'Escape') {
                 e.preventDefault()
                 if (isRunning) handleStop()
@@ -478,12 +541,12 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [isRunning, fileQueue, active])
+    }, [isRunning, queue, active])
 
     // Expose methods to parent via ref
     useImperativeHandle(ref, () => ({
         startTranslation: () => {
-            if (!isRunning && fileQueue.length > 0) handleStartQueue()
+            if (!isRunning && queue.length > 0) handleStartQueue()
         },
         stopTranslation: () => {
             if (isRunning) handleStop()
@@ -570,18 +633,159 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         setChartData(dataset.map(h => ({ time: h.time, speed: h.value })))
     }, [chartMode])
 
+
+
+    // File icon helper (Synced with LibraryView)
+
+
     const handleAddFiles = async () => {
         const files = await window.api?.selectFiles()
-        if (files?.length) setFileQueue(prev => [...prev, ...files.filter((f: string) => !prev.includes(f))])
+        if (files?.length) {
+            const existing = new Set(queue.map(q => q.path))
+            const newItems = files.filter((f: string) => !existing.has(f)).map((path: string) => ({
+                id: generateId(),
+                path,
+                fileName: path.split(/[/\\]/).pop() || path,
+                fileType: getFileType(path),
+                addedAt: new Date().toISOString(),
+                config: { useGlobalDefaults: true },
+                status: 'pending' as const
+            }))
+            if (newItems.length) setQueue(prev => [...prev, ...newItems])
+        }
     }
 
     const handleAddFolder = async () => {
         const files = await window.api?.selectFolderFiles()
-        if (files?.length) setFileQueue(prev => [...prev, ...files.filter((f: string) => !prev.includes(f))])
+        if (files?.length) {
+            const existing = new Set(queue.map(q => q.path))
+            const newItems = files.filter((f: string) => !existing.has(f)).map((path: string) => ({
+                id: generateId(),
+                path,
+                fileName: path.split(/[/\\]/).pop() || path,
+                fileType: getFileType(path),
+                addedAt: new Date().toISOString(),
+                config: { useGlobalDefaults: true },
+                status: 'pending' as const
+            }))
+            if (newItems.length) setQueue(prev => [...prev, ...newItems])
+        }
     }
 
-    const handleRemoveFile = (index: number) => setFileQueue(prev => prev.filter((_, i) => i !== index))
-    const handleClearQueue = () => setFileQueue([])
+    const handleRemoveFile = (index: number) => {
+        const item = queue[index]
+        const isCompleted = completedFiles.has(item.path) || item.status === 'completed'
+
+        if (isCompleted) {
+            const newQueue = [...queue]
+            newQueue.splice(index, 1)
+            setQueue(newQueue)
+            if (index === currentQueueIndex) {
+                setCurrentQueueIndex(-1)
+            } else if (index < currentQueueIndex) {
+                setCurrentQueueIndex(currentQueueIndex - 1)
+            }
+            return
+        }
+
+        showConfirm({
+            title: lang === 'zh' ? '确认移除' : 'Confirm Remove',
+            description: lang === 'zh' ? `确定要移除 "${item.fileName}" 吗？` : `Are you sure you want to remove "${item.fileName}"?`,
+            variant: 'destructive',
+            onConfirm: () => {
+                const newQueue = [...queue]
+                newQueue.splice(index, 1)
+                setQueue(newQueue)
+                if (index === currentQueueIndex) {
+                    setCurrentQueueIndex(-1)
+                } else if (index < currentQueueIndex) {
+                    setCurrentQueueIndex(currentQueueIndex - 1)
+                }
+            }
+        })
+    }
+    const handleClearQueue = useCallback(() => {
+        showConfirm({
+            title: t.dashboard.clear,
+            description: (t as any).confirmClear || "Are you sure you want to clear the translation queue?",
+            variant: 'destructive',
+            onConfirm: () => {
+                setQueue([])
+                localStorage.setItem('library_queue', JSON.stringify([]))
+            }
+        })
+    }, [t, showConfirm])
+
+    // Drag handlers
+    // Unified Drop Handler for Queue
+    const handleDrop = useCallback(async (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+
+        // 1. Check for Internal Reorder
+        const sourceIndexStr = e.dataTransfer.getData('text/plain')
+        if (sourceIndexStr && !isNaN(parseInt(sourceIndexStr))) {
+            // It's a reorder event, handled by the specific item onDrop (bubbling prevented there)
+            // But if dropped on container empty space, we might want to move to end?
+            // Current item-based reorder handles exact position.
+            // Let's just return if it looks like a reorder to avoid file processing
+            return
+        }
+
+        // 2. Handle File/Folder Drop
+        const items = Array.from(e.dataTransfer.items)
+        const paths: string[] = []
+
+        for (const item of items) {
+            if (item.kind === 'file') {
+                const file = item.getAsFile()
+                if (file && (file as any).path) paths.push((file as any).path)
+            }
+        }
+
+        if (paths.length > 0) {
+            const finalPaths: string[] = []
+
+            // Scan for folders
+            for (const p of paths) {
+                try {
+                    const expanded = await window.api?.scanDirectory(p)
+                    if (expanded && expanded.length > 0) {
+                        finalPaths.push(...expanded)
+                    }
+                } catch (e) {
+                    console.error("Scan failed for", p, e)
+                }
+            }
+
+            if (finalPaths.length > 0) {
+                const existing = new Set(queue.map(q => q.path))
+                const newItems = finalPaths.filter((f: string) => !existing.has(f)).map((path: string) => ({
+                    id: generateId(),
+                    path,
+                    fileName: path.split(/[/\\]/).pop() || path,
+                    fileType: getFileType(path),
+                    addedAt: new Date().toISOString(),
+                    config: { useGlobalDefaults: true },
+                    status: 'pending' as const
+                }))
+                if (newItems.length) setQueue(prev => [...prev, ...newItems])
+            }
+        }
+    }, [queue])
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only trigger container effects for file drops, not internal reordering
+        if (e.dataTransfer.types.includes('Files') && !isReordering) {
+            e.dataTransfer.dropEffect = 'copy'
+        } else if (e.dataTransfer.types.includes('text/plain')) {
+            e.dataTransfer.dropEffect = 'move'
+        }
+    }, [isReordering])
+
+
 
     const startTranslation = (inputPath: string, forceResume?: boolean, glossaryOverride?: string) => {
         setIsRunning(true)
@@ -597,10 +801,19 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         setProgress({ current: 0, total: 0, percent: 0, elapsed: 0, remaining: 0, speedLines: 0, speedChars: 0, speedEval: 0, speedGen: 0, retries: 0 })
         setPreviewBlocks({})
         localStorage.removeItem("last_preview_blocks") // Clear persisted preview
-        localStorage.removeItem("last_preview_blocks") // Clear persisted preview
+
+        // Load Library Queue for Custom Config Overrides
+        let customConfig: any = {}
+        try {
+            const libQueue = JSON.parse(localStorage.getItem("library_queue") || "[]")
+            const item = libQueue.find((q: any) => q.path === inputPath)
+            if (item && item.config && !item.config.useGlobalDefaults) {
+                customConfig = item.config
+            }
+        } catch (e) { console.error("Failed to load library config:", e) }
 
         // 根据 ctx 自动计算 chunk-size：公式 (ctx - 500) / 3.5 * 1.3 (Qwen Token Density)
-        const ctxValue = parseInt(localStorage.getItem("config_ctx") || "4096")
+        const ctxValue = customConfig.contextSize || parseInt(localStorage.getItem("config_ctx") || "4096")
         // 根据 ctx 自动计算 chunk-size：公式 (ctx - 500) / 3.5 * 1.3 (Qwen Token Density)
         const calculatedChunkSize = Math.max(200, Math.min(3072, Math.floor(((ctxValue - 500) / 3.5) * 1.3)))
 
@@ -615,16 +828,15 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
 
         const config = {
-            gpuLayers: localStorage.getItem("config_gpu"),
+            gpuLayers: customConfig.gpuLayers !== undefined ? String(customConfig.gpuLayers) : (localStorage.getItem("config_gpu") || "0"),
             ctxSize: ctxValue.toString(),
             chunkSize: calculatedChunkSize.toString(),
             serverUrl: localStorage.getItem("config_server"),
-            outputDir: localStorage.getItem("config_output_dir"),
-            glossaryPath: glossaryOverride !== undefined ? glossaryOverride : glossaryPath,
-            preset: localStorage.getItem("config_preset") || "training",
+            outputDir: customConfig.outputDir || localStorage.getItem("config_output_dir"),
+            glossaryPath: glossaryOverride !== undefined ? glossaryOverride : (customConfig.glossaryPath || glossaryPath),
+            preset: customConfig.preset || localStorage.getItem("config_preset") || "training",
             rulesPre: JSON.parse(localStorage.getItem("config_rules_pre") || "[]"),
             rulesPost: JSON.parse(localStorage.getItem("config_rules_post") || "[]"),
-            saveCot: saveCot,
 
             // Device Mode
             deviceMode: localStorage.getItem("config_device_mode") || "auto",
@@ -634,7 +846,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
             // Text Processing Options (from Settings)
 
             // Quality Control Settings
-            temperature: parseFloat(localStorage.getItem("config_temperature") || "0.7"),
+            temperature: customConfig.temperature ?? parseFloat(localStorage.getItem("config_temperature") || "0.7"),
 
             // Storage
             cacheDir: localStorage.getItem("config_cache_dir") || "",
@@ -646,8 +858,8 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
             strictMode: (localStorage.getItem("config_line_check") !== "false")
                 ? (localStorage.getItem("config_strict_mode") || "off")
                 : "off",
-            repPenaltyBase: parseFloat(localStorage.getItem("config_rep_penalty_base") || "1.0"),
-            repPenaltyMax: parseFloat(localStorage.getItem("config_rep_penalty_max") || "1.5"),
+            repPenaltyBase: customConfig.repPenaltyBase ?? parseFloat(localStorage.getItem("config_rep_penalty_base") || "1.0"),
+            repPenaltyMax: customConfig.repPenaltyMax ?? parseFloat(localStorage.getItem("config_rep_penalty_max") || "1.5"),
             repPenaltyStep: parseFloat(localStorage.getItem("config_rep_penalty_step") || "0.1"),
             maxRetries: parseInt(localStorage.getItem("config_max_retries") || "3"),
 
@@ -668,20 +880,21 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
             daemonMode: localStorage.getItem("config_daemon_mode") === "true",
 
             // Concurrency
-            concurrency: parseInt(localStorage.getItem("config_concurrency") || "1"),
-            flashAttn: localStorage.getItem("config_flash_attn") === "true",
-            kvCacheType: localStorage.getItem("config_kv_cache_type") || "f16",
+            concurrency: customConfig.concurrency ?? parseInt(localStorage.getItem("config_concurrency") || "1"),
+            flashAttn: customConfig.flashAttn !== undefined ? customConfig.flashAttn : (localStorage.getItem("config_flash_attn") === "true"),
+            kvCacheType: customConfig.kvCacheType || localStorage.getItem("config_kv_cache_type") || "f16",
             useLargeBatch: localStorage.getItem("config_use_large_batch") === "true",
             physicalBatchSize: parseInt(localStorage.getItem("config_physical_batch_size") || "1024"),
-            seed: localStorage.getItem("config_seed") ? parseInt(localStorage.getItem("config_seed")!) : undefined,
+            seed: customConfig.seed !== undefined ? customConfig.seed : (localStorage.getItem("config_seed") ? parseInt(localStorage.getItem("config_seed")!) : undefined),
 
             // Chunk Balancing
             balanceEnable: localStorage.getItem("config_balance_enable") !== "false",
             balanceThreshold: parseFloat(localStorage.getItem("config_balance_threshold") || "0.6"),
             balanceCount: parseInt(localStorage.getItem("config_balance_count") || "3"),
 
-            // Auxiliary Alignment Mode
-            alignmentMode: alignmentMode
+            // Feature Flags
+            alignmentMode: customConfig.alignmentMode !== undefined ? customConfig.alignmentMode : (localStorage.getItem("config_alignment_mode") === "true"),
+            saveCot: customConfig.saveCot !== undefined ? customConfig.saveCot : (localStorage.getItem("config_save_cot") === "true")
         }
 
         // Create history record
@@ -712,8 +925,12 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
         addRecord(newRecord)
 
-        console.log("[DEBUG] Translation Config:", JSON.stringify({ ...config, highFidelity: undefined }, null, 2))
-        window.api?.startTranslation(inputPath, modelPath, config)
+        const finalConfig = { ...config, highFidelity: undefined }
+        // Update local session state to match effective config for UI feedback
+        setAlignmentMode(finalConfig.alignmentMode)
+        setSaveCot(finalConfig.saveCot)
+
+        window.api?.startTranslation(inputPath, modelPath, finalConfig)
     }
 
     // --- State for Confirmation Modal ---
@@ -728,31 +945,18 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
 
 
     const handleStartQueue = async () => {
-        if (fileQueue.length === 0) return
+        if (queue.length === 0) return
 
         // Check first file (or current index if we support jumping)
         // Currently we always start from index 0 when clicking Play?
-        // Logic: setCurrentQueueIndex(0); startTranslation(fileQueue[0])
+        // Logic: setCurrentQueueIndex(0); startTranslation(queue[0].path)
         const targetIndex = 0
-        const inputPath = fileQueue[targetIndex]
+        const inputPath = queue[targetIndex].path
 
         await checkAndStart(inputPath, targetIndex)
     }
 
     const checkAndStart = async (inputPath: string, index: number) => {
-        // Construct temp config to check path (reusing logic from startTranslation is hard because it's inside)
-        // Better: Refactor startTranslation to accept 'forceResume' override, and split Check vs Start.
-        // But for now, we can check basic default output path or use the config logic.
-        // To be accurate, we should use the EXACT same logic as startTranslation.
-
-        // Let's modify startTranslation to be async and handle the check?
-        // But startTranslation triggers the run.
-
-        // New Approach: Call prepareTranslationConfig first, then check, then start.
-        prepareAndCheck(inputPath, index)
-    }
-
-    const prepareAndCheck = async (inputPath: string, index: number) => {
         // ... (Duplicate config logic? Or refactor?)
         // Refactoring is cleaner. 
         // But to minimize changes, I will implement a lightweight check using the same config loading.
@@ -815,9 +1019,9 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
         }
     }
 
-    // Keep prepareAndCheckRef in sync for use in stale-closure contexts
+    // Keep checkAndStartRef in sync for use in stale-closure contexts
     useEffect(() => {
-        prepareAndCheckRef.current = prepareAndCheck
+        checkAndStartRef.current = checkAndStart
     })
 
     const handleStop = () => {
@@ -1026,24 +1230,31 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
     }
 
     const needsModel = models.length === 0
-    const canStart = fileQueue.length > 0 && !isRunning
+    const canStart = queue.length > 0 && !isRunning
 
     return (
-        <div className="flex-1 h-screen flex flex-col bg-background overflow-hidden">
+        <div
+            ref={containerRef}
+            className="flex-1 h-screen flex flex-col bg-background overflow-hidden relative"
+        >
 
 
             <div className="flex-1 p-4 flex gap-4 overflow-hidden min-h-0">
 
-                <div className={`${queueCollapsed ? 'w-[50px]' : 'w-[200px]'} shrink-0 flex flex-col bg-card rounded-2xl shadow-lg border border-border overflow-hidden transition-all duration-300`}>
+                <div
+                    className={`${queueCollapsed ? 'w-[50px]' : 'w-[200px]'} shrink-0 flex flex-col bg-card rounded-2xl shadow-lg border border-border overflow-hidden transition-all duration-300`}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                >
                     <div className="p-3 border-b border-border bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" onClick={() => setQueueCollapsed(!queueCollapsed)}>
                         <h3 className="font-bold text-foreground flex items-center gap-2 text-sm">
                             <Layers className="w-4 h-4 text-primary" />
-                            {!queueCollapsed && <><span>{t.dashboard.queue}</span><span className="ml-auto text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium">{fileQueue.length}</span></>}
+                            {!queueCollapsed && <><span>{t.dashboard.queue}</span><span className="ml-auto text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium">{queue.length}</span></>}
                         </h3>
                     </div>
                     {!queueCollapsed && (
                         <>
-                            <div className="p-3 border-b border-border">
+                            <div className="p-3">
                                 <div className="flex gap-2">
                                     <Button size="sm" variant="outline" onClick={handleAddFiles} className="flex-1 text-xs h-9">
                                         <Plus className="w-3 h-3 mr-1" /> {t.dashboard.addFiles}
@@ -1053,65 +1264,85 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                                     </Button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                                {fileQueue.length === 0 ? (
+                            <div
+                                className="flex-1 overflow-y-auto p-2 space-y-1 relative"
+                            >
+                                {queue.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm px-4 text-center">
                                         <FolderOpen className="w-12 h-12 mb-3 opacity-20" />
                                         <p className="font-medium text-muted-foreground">{t.dashboard.dragDrop}</p>
                                         <p className="text-xs mt-2 text-muted-foreground/70">{t.dashboard.supportedTypes}</p>
                                     </div>
                                 ) : (
-                                    fileQueue.map((file, i) => (
+                                    queue.map((item, i) => (
                                         <div
-                                            key={file}
+                                            key={item.id}
                                             ref={i === currentQueueIndex ? activeQueueItemRef : null}
                                             className={`flex items-center gap-2 p-2.5 rounded-lg text-xs group transition-all 
                                                 ${i === currentQueueIndex ? 'bg-primary/20 text-primary shadow-sm ring-1 ring-primary/20' :
-                                                    completedFiles.has(file) ? 'bg-secondary/30 text-muted-foreground opacity-60 hover:opacity-100' :
+                                                    completedFiles.has(item.path) ? 'bg-secondary/30 text-muted-foreground opacity-60 hover:opacity-100' :
                                                         'hover:bg-secondary'}`}
                                             onDragOver={(e) => {
                                                 e.preventDefault()
+                                                e.stopPropagation()
                                                 e.dataTransfer.dropEffect = 'move'
                                             }}
                                             onDrop={(e) => {
                                                 e.preventDefault()
+                                                e.stopPropagation()
                                                 if (isRunning) return
-                                                const sourceIndexStr = e.dataTransfer.getData('text/plain')
-                                                if (!sourceIndexStr) return
 
+                                                const sourceIndexStr = e.dataTransfer.getData('text/plain')
+                                                if (sourceIndexStr === "") return
                                                 const sourceIndex = parseInt(sourceIndexStr)
                                                 if (isNaN(sourceIndex) || sourceIndex === i) return
 
-                                                const newQueue = [...fileQueue]
-                                                const [removed] = newQueue.splice(sourceIndex, 1)
-                                                newQueue.splice(i, 0, removed)
-                                                setFileQueue(newQueue)
+                                                const newQueue = [...queue]
+                                                const [movedItem] = newQueue.splice(sourceIndex, 1)
+                                                newQueue.splice(i, 0, movedItem)
+                                                setQueue(newQueue)
+
+                                                // Sync current selection if needed
+                                                if (sourceIndex === currentQueueIndex) {
+                                                    setCurrentQueueIndex(i)
+                                                } else if (sourceIndex < currentQueueIndex && i >= currentQueueIndex) {
+                                                    setCurrentQueueIndex(currentQueueIndex - 1)
+                                                } else if (sourceIndex > currentQueueIndex && i <= currentQueueIndex) {
+                                                    setCurrentQueueIndex(currentQueueIndex + 1)
+                                                }
                                             }}
                                         >
                                             <div
-                                                className={`cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground ${isRunning ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                className={`p-1 shrink-0 transition-colors ${isRunning ? 'opacity-10 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing text-muted-foreground/30 hover:text-foreground'}`}
                                                 draggable={!isRunning}
                                                 onDragStart={(e) => {
                                                     if (isRunning) {
                                                         e.preventDefault()
                                                         return
                                                     }
+                                                    setIsReordering(true)
                                                     e.dataTransfer.setData('text/plain', i.toString())
                                                     e.dataTransfer.effectAllowed = 'move'
                                                 }}
+                                                onDragEnd={() => setIsReordering(false)}
                                             >
                                                 <GripVertical className="w-3.5 h-3.5" />
                                             </div>
                                             {i === currentQueueIndex && isRunning ? (
                                                 <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                                            ) : completedFiles.has(file) || (currentQueueIndex > 0 && i < currentQueueIndex) ? (
-                                                <FileCheck className="w-4 h-4 text-green-500 shrink-0" />
                                             ) : (
-                                                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                                                <div className="relative shrink-0">
+                                                    <FileIcon type={item.fileType} />
+                                                    {(completedFiles.has(item.path) || (currentQueueIndex > 0 && i < currentQueueIndex)) && (
+                                                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full ring-1 ring-background" />
+                                                    )}
+                                                </div>
                                             )}
                                             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                                                <span className="truncate font-medium">{file.split(/[/\\]/).pop()}</span>
-                                                <span className="truncate text-[10px] opacity-50" title={file}>{file}</span>
+                                                <span className="truncate font-medium">{item.fileName}</span>
+                                                <UITooltip content={<span className="font-mono text-xs">{item.path}</span>}>
+                                                    <span className="truncate text-[10px] opacity-50 cursor-pointer hover:opacity-100 hover:text-foreground transition-opacity">{item.path}</span>
+                                                </UITooltip>
                                             </div>
                                             <Button
                                                 variant="ghost"
@@ -1121,18 +1352,24 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                                                     e.stopPropagation()
                                                     handleRemoveFile(i)
                                                 }}
-                                                disabled={isRunning && i === currentQueueIndex}
+                                                disabled={isRunning}
                                             >
-                                                <X className="w-3 h-3 text-muted-foreground hover:text-red-500" />
+                                                <X className={`w-3 h-3 ${isRunning ? 'text-muted-foreground/50' : 'text-muted-foreground hover:text-red-500'}`} />
                                             </Button>
                                         </div>
                                     ))
                                 )}
                             </div>
-                            {fileQueue.length > 0 && (
-                                <div className="p-2 border-t border-border">
-                                    <Button size="sm" variant="ghost" onClick={handleClearQueue} className="w-full text-xs text-muted-foreground h-8">
-                                        <Trash2 className="w-3 h-3 mr-1" /> {t.dashboard.clear}
+                            {queue.length > 0 && (
+                                <div className="p-2">
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={handleClearQueue}
+                                        disabled={isRunning}
+                                        className={`w-full text-[10px] font-bold text-muted-foreground/50 hover:text-red-500 hover:bg-red-500/5 transition-all rounded-md h-7 border-none shadow-none ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        <Trash2 className="w-3 h-3 mr-1 opacity-50 group-hover:opacity-100" /> {t.dashboard.clear}
                                     </Button>
                                 </div>
                             )}
@@ -1399,7 +1636,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active }, ref)
                             <X className="w-3.5 h-3.5" />
                         </Button>
                         <span className="text-xs text-muted-foreground font-medium ml-2">
-                            {isRunning ? `${t.dashboard.processing} ${currentQueueIndex + 1}/${fileQueue.length}` : needsModel ? t.dashboard.selectModelWarn : t.dashboard.startHint}
+                            {isRunning ? `${t.dashboard.processing} ${currentQueueIndex + 1}/${queue.length}` : needsModel ? t.dashboard.selectModelWarn : t.dashboard.startHint}
                         </span>
                     </div>
 

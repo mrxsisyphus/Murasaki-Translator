@@ -727,6 +727,15 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
     const recentFiles = getRecentCacheFiles()
 
+    // Check for target file from LibraryView navigation (on mount)
+    useEffect(() => {
+        const targetFile = localStorage.getItem('proofread_target_file')
+        if (targetFile) {
+            localStorage.removeItem('proofread_target_file') // Clear to prevent re-loading
+            loadCacheFromPath(targetFile)
+        }
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
     // Load specific cache file
     const loadCacheFromPath = async (path: string) => {
         setLoading(true)
@@ -735,9 +744,16 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
             const data = await window.api.loadCache(path)
             if (data) {
                 await processLoadedData(data, path)
+            } else {
+                throw new Error("Empty data returned")
             }
         } catch (e) {
             console.error('Failed to load cache:', e)
+            showAlert({
+                title: '无法加载校对文件',
+                description: `读取文件失败: ${path}\n${e}`,
+                variant: 'destructive'
+            })
         } finally {
             setLoading(false)
         }

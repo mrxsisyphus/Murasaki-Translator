@@ -7,7 +7,7 @@ interface AlertModalProps {
     onOpenChange: (open: boolean) => void
     title: string
     description: string | React.ReactNode
-    variant?: 'default' | 'destructive' | 'info' | 'success'
+    variant?: 'default' | 'destructive' | 'info' | 'success' | 'warning'
     onConfirm?: () => void
     confirmText?: string
     cancelText?: string
@@ -29,7 +29,7 @@ export function AlertModal({
 
     const getIcon = () => {
         switch (variant) {
-            case 'destructive': return <AlertTriangle className="w-6 h-6 text-red-500" />
+            case 'warning': return <AlertTriangle className="w-6 h-6 text-yellow-500" />
             case 'success': return <CheckCircle2 className="w-6 h-6 text-green-500" />
             case 'info': return <Info className="w-6 h-6 text-blue-500" />
             default: return <AlertTriangle className="w-6 h-6 text-yellow-500" />

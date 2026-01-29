@@ -10,7 +10,8 @@ import {
     Sun,
     Moon,
     Clock,
-    ClipboardCheck
+    ClipboardCheck,
+    Layers
 } from "lucide-react"
 import { cn } from "../lib/utils"
 import { translations, Language } from "../lib/i18n"
@@ -54,6 +55,7 @@ export function Sidebar({ lang, setLang, view, setView }: SidebarProps) {
     const menuItems = [
         // 主功能
         { icon: Play, label: t.nav.start, id: 'dashboard' },
+        { icon: Layers, label: lang === 'zh' ? '翻译队列' : lang === 'jp' ? 'ワークベンチ' : 'Workbench', id: 'library' },
         { icon: Clock, label: t.nav.history, id: 'history' },
         { icon: ClipboardCheck, label: t.nav.proofread, id: 'proofread' },
         // 配置

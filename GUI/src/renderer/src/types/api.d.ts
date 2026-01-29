@@ -98,6 +98,7 @@ export interface ElectronAPI {
     readFile: (path: string) => Promise<string>
     selectDirectory: () => Promise<string | null>
     selectFolder: (options?: { title?: string }) => Promise<string | null>
+    scanDirectory: (path: string, recursive?: boolean) => Promise<string[]>
     listCacheFiles: (folderPath: string) => Promise<{ name: string; path: string }[]>
     openPath: (filePath: string) => Promise<string>
     openFolder: (folderPath: string) => Promise<boolean>

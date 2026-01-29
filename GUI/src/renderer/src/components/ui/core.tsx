@@ -164,7 +164,9 @@ Label.displayName = "Label"
 
 export { Label }
 
-// --- Tooltip Component ---
+// --- Tooltip Component (Portal-based to avoid overflow clipping) ---
+import { createPortal } from "react-dom"
+
 interface TooltipProps {
     children: React.ReactNode
     content: React.ReactNode
@@ -172,18 +174,67 @@ interface TooltipProps {
 }
 
 const Tooltip = ({ children, content, className }: TooltipProps) => {
+    const [isVisible, setIsVisible] = React.useState(false)
+    const [position, setPosition] = React.useState({ top: 0, left: 0 })
+    const triggerRef = React.useRef<HTMLDivElement>(null)
+
+    const updatePosition = React.useCallback(() => {
+        if (triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect()
+            setPosition({
+                top: rect.top - 8, // Above the element with spacing
+                left: rect.left + rect.width / 2
+            })
+        }
+    }, [])
+
+    const handleMouseEnter = () => {
+        updatePosition()
+        setIsVisible(true)
+    }
+
+    const handleMouseLeave = () => {
+        setIsVisible(false)
+    }
+
+    React.useEffect(() => {
+        if (isVisible) {
+            const handleScroll = () => setIsVisible(false)
+            window.addEventListener('scroll', handleScroll, { capture: true })
+            return () => window.removeEventListener('scroll', handleScroll, { capture: true })
+        }
+    }, [isVisible])
+
     return (
-        <div className="group relative flex items-center">
-            {children}
-            <div className={cn(
-                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-popover border border-border text-popover-foreground text-[11px] rounded-lg shadow-xl opacity-0 translate-y-1 pointer-events-none transition-all duration-200 group-hover:opacity-100 group-hover:translate-y-0 z-[100] w-max max-w-[240px] leading-relaxed backdrop-blur-md whitespace-pre-line",
-                className
-            )}>
-                {content}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 border-x-[5px] border-x-transparent border-t-[5px] border-t-popover" />
+        <>
+            <div
+                ref={triggerRef}
+                className="flex items-center"
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
+            >
+                {children}
             </div>
-        </div>
+            {isVisible && createPortal(
+                <div
+                    className={cn(
+                        "fixed px-3 py-1.5 bg-popover border border-border text-popover-foreground text-[11px] rounded-lg shadow-xl z-[9999] w-max max-w-[240px] leading-relaxed backdrop-blur-md whitespace-pre-line pointer-events-none animate-in fade-in-0 zoom-in-95 duration-150",
+                        className
+                    )}
+                    style={{
+                        top: position.top,
+                        left: position.left,
+                        transform: 'translate(-50%, -100%)'
+                    }}
+                >
+                    {content}
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-x-[5px] border-x-transparent border-t-[5px] border-t-popover" />
+                </div>,
+                document.body
+            )}
+        </>
     )
 }
 
 export { Tooltip }
+

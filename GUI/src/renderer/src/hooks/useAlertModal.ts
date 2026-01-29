@@ -4,7 +4,7 @@ export interface AlertConfig {
     open: boolean
     title: string
     description: string | React.ReactNode
-    variant?: 'default' | 'destructive' | 'info' | 'success'
+    variant?: 'default' | 'destructive' | 'info' | 'success' | 'warning'
     onConfirm?: () => void
     confirmText?: string
     cancelText?: string
@@ -21,7 +21,7 @@ export function useAlertModal() {
     const showAlert = useCallback((config: {
         title: string,
         description: string | React.ReactNode,
-        variant?: 'default' | 'success' | 'info' | 'destructive',
+        variant?: 'default' | 'success' | 'info' | 'destructive' | 'warning',
         confirmText?: string
     }) => {
         setAlertConfig({
@@ -35,7 +35,7 @@ export function useAlertModal() {
         title: string,
         description: string | React.ReactNode,
         onConfirm: () => void,
-        variant?: 'destructive' | 'default',
+        variant?: 'destructive' | 'default' | 'warning',
         confirmText?: string,
         cancelText?: string
     }) => {

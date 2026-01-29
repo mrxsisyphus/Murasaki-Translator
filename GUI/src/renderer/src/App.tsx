@@ -6,6 +6,7 @@ import { AdvancedView } from "./components/AdvancedView"
 import { ModelView } from "./components/ModelView"
 import { GlossaryView } from "./components/GlossaryView"
 import { HistoryView } from "./components/HistoryView"
+import { LibraryView } from "./components/LibraryView"
 import ProofreadView from "./components/ProofreadView"
 
 import { Language, translations } from "./lib/i18n"
@@ -16,20 +17,21 @@ import { RuleEditor } from "./components/RuleEditor"
 import { AlertModal } from './components/ui/AlertModal'
 import { useAlertModal } from './hooks/useAlertModal'
 
-export type View = 'dashboard' | 'settings' | 'model' | 'glossary' | 'pre' | 'post' | 'advanced' | 'history' | 'proofread'
+export type View = 'dashboard' | 'library' | 'settings' | 'model' | 'glossary' | 'pre' | 'post' | 'advanced' | 'history' | 'proofread'
 
 function AppContent() {
     const [lang, setLang] = useState<Language>('zh')
     const [view, setView] = useState<View>('dashboard')
     const [proofreadHasChanges, setProofreadHasChanges] = useState(false)
     const { alertProps, showConfirm } = useAlertModal()
+    const [isRunning, setIsRunning] = useState(false)
 
     // Dashboard ref for triggering translation
     const dashboardRef = useRef<{ startTranslation?: () => void; stopTranslation?: () => void }>(null)
 
     // 快捷键处理
     const handleSwitchView = useCallback((newView: string) => {
-        const validViews: View[] = ['dashboard', 'settings', 'model', 'advanced', 'glossary', 'proofread', 'history', 'pre', 'post']
+        const validViews: View[] = ['dashboard', 'library', 'settings', 'model', 'advanced', 'glossary', 'proofread', 'history', 'pre', 'post']
 
         if (validViews.includes(newView as View)) {
             const executeSwitch = () => {
@@ -66,9 +68,25 @@ function AppContent() {
             />
             {/* Keep Dashboard mounted to preserve translation state (logs, process listeners) */}
             <div className={`flex-1 ${view === 'dashboard' ? 'flex' : 'hidden'}`}>
-                <Dashboard ref={dashboardRef} lang={lang} active={view === 'dashboard'} />
+                <Dashboard
+                    ref={dashboardRef}
+                    lang={lang}
+                    active={view === 'dashboard'}
+                    onRunningChange={setIsRunning}
+                />
             </div>
             {view === 'settings' && <SettingsView lang={lang} />}
+            {view === 'library' && (
+                <LibraryView
+                    lang={lang}
+                    isRunning={isRunning}
+                    onNavigate={(v) => handleSwitchView(v)}
+                    onProofreadFile={(cachePath) => {
+                        localStorage.setItem('proofread_target_file', cachePath)
+                        handleSwitchView('proofread')
+                    }}
+                />
+            )}
             {view === 'model' && <ModelView lang={lang} />}
             {view === 'glossary' && <GlossaryView lang={lang} />}
             {view === 'pre' && <RuleEditor lang={lang} mode="pre" />}

@@ -249,9 +249,6 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
                 <div className="flex justify-between items-center">
                     <div>
                         <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                                <Sparkles className="w-5 h-5" />
-                            </div>
                             <h2 className="text-2xl font-bold tracking-tight">
                                 {mode === 'pre' ? '预处理规则' : '后处理规则'}
                             </h2>

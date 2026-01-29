@@ -326,6 +326,75 @@ ipcMain.handle('select-folder-files', async () => {
     return files
 })
 
+// Scan directory for supported files (Drag & Drop support)
+// Scan directory for supported files (Drag & Drop support)
+// Helper for async directory scanning with concurrency control and symlink safety
+const scanDirectoryAsync = async (dir: string, recursive: boolean): Promise<string[]> => {
+    try {
+        // withFileTypes avoids separate stat calls and safer for symlinks
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+        const results: string[] = []
+        const subdirs: string[] = []
+
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name)
+
+            // Skip symbolic links to prevent infinite recursion loops
+            if (entry.isSymbolicLink()) continue
+
+            if (entry.isFile()) {
+                if (/\.(txt|epub|srt|ass|ssa)$/i.test(fullPath)) {
+                    results.push(fullPath)
+                }
+            } else if (entry.isDirectory() && recursive) {
+                subdirs.push(fullPath)
+            }
+        }
+
+        // Process subdirectories with simple batch concurrency to prevent EMFILE
+        if (subdirs.length > 0) {
+            const CONCURRENCY = 8 // Limit concurrent directory scans
+            for (let i = 0; i < subdirs.length; i += CONCURRENCY) {
+                const batch = subdirs.slice(i, i + CONCURRENCY)
+                // Parallelize within the batch
+                const batchResults = await Promise.all(batch.map(d => scanDirectoryAsync(d, recursive)))
+                // Flatten and merge
+                for (const res of batchResults) {
+                    results.push(...res)
+                }
+            }
+        }
+
+        return results
+    } catch (e) {
+        // console.error('Scan dir error:', dir, e)
+        return []
+    }
+}
+
+ipcMain.handle('scan-directory', async (_event, path: string, recursive: boolean = false) => {
+    try {
+        if (!fs.existsSync(path)) return []
+
+        // Use promises.stat for entry point too
+        const stats = await fs.promises.stat(path)
+
+        // If it's a file, return if supported
+        if (stats.isFile()) {
+            return /\.(txt|epub|srt|ass|ssa)$/i.test(path) ? [path] : []
+        }
+
+        // If directory
+        if (stats.isDirectory()) {
+            return await scanDirectoryAsync(path, recursive)
+        }
+        return []
+    } catch (e) {
+        console.error('[IPC] scan-directory error:', e)
+        return []
+    }
+})
+
 // --- Update System IPC ---
 ipcMain.handle('check-update', async () => {
     try {

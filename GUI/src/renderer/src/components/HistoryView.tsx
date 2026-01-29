@@ -300,9 +300,11 @@ export function HistoryView({ lang }: { lang: Language }) {
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-8 pb-8 scrollbar-thin scrollbar-thumb-border">
                 {records.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                        <FileText className="w-12 h-12 mb-4 opacity-30" />
-                        <p>{t.historyView.noHistory}</p>
+                    <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-muted-foreground animate-in fade-in zoom-in-95 duration-500">
+                        <div className="w-20 h-20 rounded-full bg-secondary/50 flex items-center justify-center mb-6 ring-8 ring-secondary/20">
+                            <FileText className="w-10 h-10 opacity-20" />
+                        </div>
+                        <p className="text-lg font-medium opacity-40 italic">{t.historyView.noHistory}</p>
                     </div>
                 ) : (
                     <div className="space-y-4">

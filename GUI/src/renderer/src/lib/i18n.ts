@@ -1331,7 +1331,7 @@ export const translations = {
             addFiles: 'ファイル追加',
             addFolder: 'フォルダ追加',
             dragDrop: 'ファイルをここにドラッグ＆ドロップ',
-            supportedTypes: '.txt / .epub に対応',
+            supportedTypes: '.txt / .epub / .srt / .ass に対応',
             clear: 'クリア',
             modelMissing: 'モデル未検出',
             modelMissingMsg: 'middleware/models に .gguf ファイルを配置するか、以下のリストから選択してください。',

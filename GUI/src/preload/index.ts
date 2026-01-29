@@ -8,6 +8,7 @@ const api = {
     selectFolderFiles: () => ipcRenderer.invoke('select-folder-files'),
     selectDirectory: () => ipcRenderer.invoke('select-directory'),
     selectFolder: () => ipcRenderer.invoke('select-directory'),
+    scanDirectory: (path: string, recursive: boolean = false) => ipcRenderer.invoke('scan-directory', path, recursive),
     getModels: () => ipcRenderer.invoke('get-models'),
     getModelInfo: (modelName: string) => ipcRenderer.invoke('get-model-info', modelName),
     startTranslation: (inputFile: string, modelPath: string, config: any) => ipcRenderer.send('start-translation', { inputFile, modelPath, config }),
