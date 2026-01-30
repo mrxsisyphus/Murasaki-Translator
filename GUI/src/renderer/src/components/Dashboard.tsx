@@ -828,7 +828,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
         }
 
         const config = {
-            gpuLayers: customConfig.gpuLayers !== undefined ? String(customConfig.gpuLayers) : (localStorage.getItem("config_gpu") || "0"),
+            gpuLayers: customConfig.gpuLayers !== undefined ? String(customConfig.gpuLayers) : (localStorage.getItem("config_gpu") || "-1"),
             ctxSize: ctxValue.toString(),
             chunkSize: calculatedChunkSize.toString(),
             serverUrl: localStorage.getItem("config_server"),
