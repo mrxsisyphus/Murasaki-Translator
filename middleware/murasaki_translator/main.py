@@ -715,7 +715,8 @@ def main():
             
             # Use DocumentFactory
             if source_path and os.path.exists(source_path):
-                doc = DocumentFactory.create(source_path)
+                doc = DocumentFactory.get_document(source_path)
+                doc.load()
                 print(f"[Rebuild] Loaded document structure from: {source_path}")
                 doc.save(output_path, blocks)
             elif output_path.lower().endswith('.txt'):

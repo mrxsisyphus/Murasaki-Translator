@@ -86,9 +86,22 @@ class AssDocument(BaseDocument):
                     # Context Injection: Add Speaker/Style info INLINE to guide the model
                     # Format: [Speaker](Style) Original Text (Single line to maintain line count stability)
                     context_prefix = ""
-                    if actor_name:
+                    
+                    # 1. Actor: Only inject if not already in text and not trivial
+                    if actor_name and actor_name not in raw_text:
                         context_prefix += f"[{actor_name}]"
-                    if style_name and style_name.lower() != 'default':
+
+                    # 2. Style: Only inject if meaningful (not numeric ID, not Default)
+                    # Skip 'Default', '01_jpn', 'Subtitle', etc. 
+                    # Heuristic: If style starts with digit, or is just 'Default'
+                    is_meaningful_style = (
+                        style_name and 
+                        style_name.lower() != 'default' and 
+                        not re.match(r'^\d', style_name) and  # Skip "01_jpn" etc.
+                        style_name not in raw_text # Skip if already in text
+                    )
+                    
+                    if is_meaningful_style:
                         context_prefix += f"({style_name})"
                     
                     if context_prefix:
@@ -120,55 +133,70 @@ class AssDocument(BaseDocument):
 
     def save(self, output_path: str, blocks: List[TextBlock]):
         """
-        Reconstructs the ASS file by processing ALL blocks as a continuous stream of SRT units.
-        Uses explicit index matching to map translations back to ASS templates.
+        Reconstructs the ASS file by mapping sorted blocks directly to event templates.
+        This avoids fragile regex parsing and ensures 1-to-1 alignment.
         """
         
-        # 1. Consolidate all translation output into one giant text stream
-        full_translation_stream = "\n".join([b.prompt_text for b in blocks])
+        # 1. Map blocks by ID (or index if direct mapping)
+        # blocks are sorted in main.py, but let's be safe.
+        # However, checking lengths is the primary safeguard.
         
-        # 2. Robust Regex to extract SRT units
-        # Matches: Index \n Time --> Time \n Content
-        # Uses Lookahead (?=...) to stop at the next Index block or End of String
-        pattern = re.compile(
-            r'(?P<idx>\d+)\s*\n'
-            r'(?:[\d:,]+\s*-->\s*[\d:,]+)\s*\n'
-            r'(?P<content>.*?)'
-            r'(?=\n+\s*\d+\s*\n[\d:,]+\s*-->|\Z)',
-            re.DOTALL | re.MULTILINE
-        )
+    def save(self, output_path: str, blocks: List[TextBlock]):
+        """
+        Reconstructs the ASS file by concatenating all block content and splitting into 
+        individual units. This handles the 'Grouped Block' architecture where one TextBlock
+        contains multiple translation units.
+        """
         
-        translated_map = {}
+        # 1. Collect all content from blocks (priority: dst > prompt_text)
+        full_stream = ""
+        for b in blocks:
+            # Rebuild flow uses .dst, translation flow uses .prompt_text
+            content = getattr(b, 'dst', '') or b.prompt_text
+            if content:
+                full_stream += content + "\n\n"
         
-        for match in pattern.finditer(full_translation_stream):
-            try:
-                idx = int(match.group('idx'))
-                content = match.group('content').strip()
-                translated_map[idx] = content
-            except:
-                continue
-                
-        # 3. Reconstruct events line by line
+        # 2. Normalize and Split into individual units using the header pattern as delimiter
+        # Models often use \N or \n for pseudo-SRT delimiters
+        full_stream = full_stream.replace('\\N', '\n').replace('\\n', '\n')
+        
+        # Robust pattern for ID and Timecodes
+        header_pattern = re.compile(r'(?:^|\n)\s*\d+\s*\n\s*\d{2}:\d{2}:\d{2}[,.]\d{1,3}\s*[-=>]+\s*\d{2}:\d{2}:\d{2}[,.]\d{1,3}.*?(?:\n|$)', re.MULTILINE)
+        
+        segments = header_pattern.split(full_stream)
+        
+        translated_units = []
+        if len(segments) > 1:
+            # Filter: usually segment 0 is empty (garbage before the first header).
+            # We take segments 1 to N as our individual units.
+            for seg in segments[1:]:
+                # Note: We take the whole segment. If it has hallucinations of another header, 
+                # they will be processed as separate segments by the split if the regex matches.
+                translated_units.append(seg.strip())
+        else:
+            # Fallback if no headers found: split by double newline as a hint
+            translated_units = [s.strip() for s in full_stream.split('\n\n') if s.strip()]
+
+        # 3. Map individual units back to templates
+        if len(translated_units) != len(self.event_templates):
+            print(f"[AssDocument] Warning: Extracted {len(translated_units)} units but have {len(self.event_templates)} templates.")
+
         event_lines = []
         for i, prefix in enumerate(self.event_templates):
-            current_idx = i + 1
-            
-            if current_idx in translated_map:
-                trans_text = translated_map[current_idx]
+            if i < len(translated_units):
+                trans_text = translated_units[i]
             else:
-                # Fallback: If translation missing, use empty string or placeholder
-                # To be safe, we might leave it empty or output a warning
-                trans_text = "" 
+                trans_text = ""
                 
             # Cleanups
             
             # 0. Strip Context metadata (Speaker/Style) that we injected inline
             # Matches: [Name](Style) or [Name] or (Style) at the start of the text
-            trans_text = re.sub(r'^(?:\[.*?\])?(?:\(.*?\))?\s*', '', trans_text).strip()
+            # Enhanced to support Full-width brackets 【】（）
+            trans_text = re.sub(r'^(?:\[.*?\]|【.*?】)?(?:[\(（].*?[\)）])?\s*', '', trans_text).strip()
 
-            # 1. Remove potential hallucinations like "\N\N52\N" inside the text
-            #    (Though regex content extraction usually avoids the next index, internal numbers might stay)
-            # 2. Fix newlines to \N
+            # 1. Remove residual artifacts like loose \N\N
+            # 2. Fix newlines to \N (Standard ASS line break)
             trans_text = trans_text.replace('\n', r'\N')
             
             # 3. Deduplicate \N\N (Model often outputs excess newlines)

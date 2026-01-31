@@ -3,7 +3,7 @@
  * 采用双栏联动布局 (Split View) + 内联编辑 (In-Place Edit)
  */
 
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Button } from './ui/core'
 import {
     FolderOpen,
@@ -1115,9 +1115,14 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                             const simSet = new Set(simLines)
 
                             // In line mode, render line-by-line with synchronized heights
-                            const srcLines = trimLeadingEmptyLines(block.src).split('\n')
+                            const srcLinesRaw = trimLeadingEmptyLines(block.src).split('\n')
                             const dstText = editingBlockId === block.index ? editingText : trimLeadingEmptyLines(block.dst)
-                            const dstLines = dstText.split('\n')
+                            const dstLinesRaw = dstText.split('\n')
+
+                            // Align both sides: pad shorter side with empty lines
+                            const maxLines = Math.max(srcLinesRaw.length, dstLinesRaw.length)
+                            const srcLines = [...srcLinesRaw, ...Array(maxLines - srcLinesRaw.length).fill('')]
+                            const dstLines = [...dstLinesRaw, ...Array(maxLines - dstLinesRaw.length).fill('')]
 
                             return (
                                 <div
@@ -1151,139 +1156,97 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
                                     {/* Content area: 2-column grid */}
                                     {lineMode ? (
-                                        // Line Mode: Flattened grid items for perfect line synchronization
-                                        <div className="grid relative" style={{ gridTemplateColumns: gridTemplate }}>
-                                            {/* We iterate through lines and render them as FLAT direct children of the grid */}
-                                            {srcLines.map((srcLine, lineIdx) => {
-                                                const dstLine = dstLines[lineIdx] || ''
-                                                const isWarning = simSet.has(lineIdx + 1)
-
-                                                const highlightLine = (text: string) => {
-                                                    if (!searchKeyword || !text) return text || '\u00A0'
-                                                    try {
-                                                        const flags = isRegex ? 'gi' : 'i'
-                                                        const pattern = isRegex ? searchKeyword : searchKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                                                        const regex = new RegExp(`(${pattern})`, flags)
-                                                        const parts = text.split(regex)
-                                                        return (
-                                                            <>
-                                                                {parts.map((part, i) => regex.test(part) ? <span key={i} className="bg-yellow-300 text-black rounded-none" style={{ padding: 0, margin: 0, lineHeight: 'inherit', display: 'inline' }}>{part}</span> : part)}
-                                                            </>
-                                                        )
-                                                    } catch { return text }
-                                                }
-
-                                                return (
-                                                    <div key={lineIdx} style={{ display: 'contents' }}>
-                                                        {/* Left: Source Cell */}
-                                                        <div
-                                                            className={`relative border-r border-border/20 ${isWarning ? 'bg-amber-500/20' : ''}`}
+                                        // Line Mode: per-row grid for height sync, overlay textarea for editing
+                                        <div className="relative">
+                                            {/* Display layer: per-row grid */}
+                                            <div
+                                                className="grid"
+                                                style={{ gridTemplateColumns: gridTemplate }}
+                                                onClick={() => {
+                                                    if (editingBlockId !== block.index) {
+                                                        setEditingBlockId(block.index)
+                                                        setEditingText(dstText)
+                                                    }
+                                                }}
+                                            >
+                                                {srcLines.map((srcLine, lineIdx) => {
+                                                    const dstLine = dstLines[lineIdx] || ''
+                                                    const isWarning = simSet.has(lineIdx + 1)
+                                                    const cellStyle: React.CSSProperties = {
+                                                        minHeight: '20px',
+                                                        paddingLeft: '44px',
+                                                        paddingRight: '12px',
+                                                        lineHeight: '20px',
+                                                        fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
+                                                        fontSize: '13px',
+                                                        wordBreak: 'break-all',
+                                                    }
+                                                    return (
+                                                        <React.Fragment key={lineIdx}>
+                                                            {/* Source cell */}
+                                                            <div className={`relative border-r border-border/20 ${isWarning ? 'bg-amber-500/20' : ''}`} style={cellStyle}>
+                                                                <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
+                                                                <span className="whitespace-pre-wrap text-foreground select-text">{srcLine || '\u00A0'}</span>
+                                                            </div>
+                                                            {/* Translation cell */}
+                                                            <div className={`relative cursor-text ${isWarning ? 'bg-amber-500/20' : ''}`} style={cellStyle}>
+                                                                <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
+                                                                <span className={`whitespace-pre-wrap text-foreground select-text ${editingBlockId === block.index ? 'opacity-0' : ''}`}>{dstLine || '\u00A0'}</span>
+                                                            </div>
+                                                        </React.Fragment>
+                                                    )
+                                                })}
+                                            </div>
+                                            {/* Editing overlay: full-block textarea */}
+                                            {editingBlockId === block.index && (
+                                                <div className="absolute inset-0 grid" style={{ gridTemplateColumns: gridTemplate }}>
+                                                    {/* Left: transparent placeholder to maintain layout */}
+                                                    <div className="border-r border-border/20" />
+                                                    {/* Right: textarea */}
+                                                    <div className="relative">
+                                                        <textarea
+                                                            autoFocus
+                                                            className="w-full h-full outline-none resize-none border-none m-0 bg-transparent text-foreground"
                                                             style={{
-                                                                minHeight: '20px',
-                                                                paddingLeft: '44px', // 12px (outer) + 24px (w-6) + 8px (gap)
-                                                                paddingRight: '12px',
-                                                                lineHeight: '20px',
-                                                                fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
-                                                                fontSize: '13px',
-                                                                fontWeight: 400,
-                                                                letterSpacing: '0',
-                                                                wordBreak: 'break-all',
-                                                                WebkitFontSmoothing: 'subpixel-antialiased',
-                                                                textRendering: 'geometricPrecision',
-                                                                fontVariantLigatures: 'none',
-                                                                fontKerning: 'none'
-                                                            }}
-                                                        >
-                                                            <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
-                                                            <span className="whitespace-pre-wrap text-foreground select-text">{highlightLine(srcLine)}</span>
-                                                        </div>
-                                                        {/* Right: Translation Display Cell */}
-                                                        <div
-                                                            className={`relative ${isWarning ? 'bg-amber-500/20' : ''}`}
-                                                            style={{
-                                                                minHeight: '20px',
                                                                 paddingLeft: '44px',
                                                                 paddingRight: '12px',
                                                                 lineHeight: '20px',
                                                                 fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
                                                                 fontSize: '13px',
-                                                                fontWeight: 400,
-                                                                letterSpacing: '0',
                                                                 wordBreak: 'break-all',
-                                                                WebkitFontSmoothing: 'subpixel-antialiased',
-                                                                textRendering: 'geometricPrecision',
-                                                                fontVariantLigatures: 'none',
-                                                                fontKerning: 'none'
+                                                                whiteSpace: 'pre-wrap',
                                                             }}
-                                                        >
-                                                            <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
-                                                            <span className="whitespace-pre-wrap text-foreground select-text">{highlightLine(dstLine)}</span>
-                                                        </div>
+                                                            value={editingText}
+                                                            onChange={e => {
+                                                                setEditingText(e.target.value)
+                                                                setHasUnsavedChanges(true)
+                                                            }}
+                                                            onBlur={e => {
+                                                                const newValue = e.target.value
+                                                                setCacheData(prev => {
+                                                                    if (!prev) return prev
+                                                                    const newBlocks = [...prev.blocks]
+                                                                    const targetIdx = newBlocks.findIndex(b => b.index === block.index)
+                                                                    if (targetIdx !== -1) {
+                                                                        newBlocks[targetIdx] = { ...newBlocks[targetIdx], dst: newValue, status: 'edited' }
+                                                                    }
+                                                                    return { ...prev, blocks: newBlocks }
+                                                                })
+                                                                setHasUnsavedChanges(true)
+                                                                setEditingBlockId(null)
+                                                            }}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Escape') e.currentTarget.blur()
+                                                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                                    e.preventDefault()
+                                                                    e.currentTarget.blur()
+                                                                }
+                                                            }}
+                                                            spellCheck={false}
+                                                        />
                                                     </div>
-                                                )
-                                            })}
-
-                                            {/* Transparent textarea overlay - now properly aligned because grid rows share high */}
-                                            <textarea
-                                                className="absolute right-0 top-0 w-1/2 h-full bg-transparent outline-none resize-none cursor-text border-none m-0"
-                                                style={{
-                                                    color: 'transparent',
-                                                    caretColor: 'hsl(var(--primary))',
-                                                    paddingLeft: '44px',
-                                                    paddingRight: '12px',
-                                                    paddingTop: '1px', // Crucial: Fixes the 1px baseline shift in standard textareas
-                                                    paddingBottom: '0',
-                                                    lineHeight: '20px',
-                                                    fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
-                                                    fontSize: '13px',
-                                                    fontWeight: 400,
-                                                    letterSpacing: '0',
-                                                    wordSpacing: '0',
-                                                    wordBreak: 'break-all',
-                                                    whiteSpace: 'pre-wrap',
-                                                    WebkitFontSmoothing: 'subpixel-antialiased',
-                                                    textRendering: 'geometricPrecision',
-                                                    boxSizing: 'border-box',
-                                                    fontVariantLigatures: 'none',
-                                                    fontKerning: 'none',
-                                                    overflow: 'hidden'
-                                                }}
-                                                value={dstText}
-                                                onChange={e => {
-                                                    setEditingText(e.target.value)
-                                                    setHasUnsavedChanges(true)
-                                                }}
-                                                onFocus={() => {
-                                                    setEditingBlockId(block.index)
-                                                    setEditingText(dstText)
-                                                }}
-                                                onBlur={(e) => {
-                                                    // Sync to global state only on blur to avoid lag
-                                                    const newValue = e.target.value
-                                                    setCacheData(prev => {
-                                                        if (!prev) return prev
-                                                        const newBlocks = [...prev.blocks]
-                                                        const targetIdx = newBlocks.findIndex(b => b.index === block.index)
-                                                        if (targetIdx !== -1) {
-                                                            newBlocks[targetIdx] = { ...newBlocks[targetIdx], dst: newValue, status: 'edited' }
-                                                        }
-                                                        return { ...prev, blocks: newBlocks }
-                                                    })
-                                                    setHasUnsavedChanges(true)
-                                                    setEditingBlockId(null)
-                                                }}
-                                                onKeyDown={e => {
-                                                    if (e.key === 'Escape') {
-                                                        e.currentTarget.blur()
-                                                    }
-                                                    // Ctrl+Enter or Cmd+Enter to save (blur triggers save)
-                                                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                                        e.preventDefault()
-                                                        e.currentTarget.blur()
-                                                    }
-                                                }}
-                                                spellCheck={false}
-                                            />
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         // Block Mode: Original layout
