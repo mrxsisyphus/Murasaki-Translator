@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/core"
 import { Button } from "./ui/core"
 import { AlertModal } from "./ui/AlertModal"
 import { translations, Language } from "../lib/i18n"
-import { APP_CONFIG } from "../lib/config"
+import { APP_CONFIG, DEFAULT_POST_RULES } from "../lib/config"
 import { cn } from "../lib/utils"
 
 
@@ -120,6 +120,11 @@ export function SettingsView({ lang }: { lang: Language }) {
                         localStorage.removeItem(key)
                     }
                 })
+
+                // Write default post-processing rules so translation works immediately
+                // Uses shared constant from config.ts for maintainability
+                localStorage.setItem('config_rules_post', JSON.stringify(DEFAULT_POST_RULES))
+
                 // Reload to apply defaults across all components
                 window.location.reload()
             }

@@ -14,7 +14,6 @@ export function AdvancedView({ lang }: { lang: Language }) {
     const [gpuLayers, setGpuLayers] = useState("-1")
     const [ctxSize, setCtxSize] = useState("4096")
     const [concurrency, setConcurrency] = useState(1) // Parallel Slots (1-4)
-    // Granular High-Fidelity (Master Switch Removed)
     // Granular High-Fidelity
     const [flashAttn, setFlashAttn] = useState(true)
     const [kvCacheType, setKvCacheType] = useState("q8_0")
@@ -23,6 +22,9 @@ export function AdvancedView({ lang }: { lang: Language }) {
     const [physicalBatchSize, setPhysicalBatchSize] = useState(1024)
     const [autoBatchSwitch, setAutoBatchSwitch] = useState(true)
     const [seed, setSeed] = useState("") // String for input, parse to int
+
+    // Flag to prevent auto-switch from overriding saved values during initial load
+    const [isLoaded, setIsLoaded] = useState(false)
 
     const [serverUrl, setServerUrl] = useState("")
     const [promptPreset, setPromptPreset] = useState("training")
@@ -178,9 +180,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
         if (savedCount) setBalanceCount(parseInt(savedCount))
 
         loadHardwareSpecs()
+
+        // Mark as loaded to enable auto-switch effects
+        setIsLoaded(true)
     }, [])
 
     useEffect(() => {
+        if (!isLoaded) return // Don't run before initial load completes
         if (autoBatchSwitch) {
             const ctxValue = parseInt(ctxSize);
             if (concurrency === 1) {
@@ -191,14 +197,15 @@ export function AdvancedView({ lang }: { lang: Language }) {
                 setPhysicalBatchSize(Math.min(1024, ctxValue));
             }
         }
-    }, [concurrency, autoBatchSwitch, ctxSize]);
+    }, [concurrency, autoBatchSwitch, ctxSize, isLoaded]);
 
     useEffect(() => {
+        if (!isLoaded) return // Don't run before initial load completes
         if (autoKvSwitch) {
             // Auto KV Strategy: np=1 -> f16 (Extreme Qual), np>1 -> q8_0 (Balanced)
             setKvCacheType(concurrency > 1 ? "q8_0" : "f16");
         }
-    }, [concurrency, autoKvSwitch]);
+    }, [concurrency, autoKvSwitch, isLoaded]);
 
     const loadHardwareSpecs = async () => {
         setLoadingSpecs(true)
@@ -486,7 +493,7 @@ export function AdvancedView({ lang }: { lang: Language }) {
                                                                     </div>
                                                                 </div>
                                                                 <div className="text-[10px] text-right text-muted-foreground">
-                                                                    ≈ 3k - 4.5k Context
+                                                                    ≈ 3.5k - 5k Context
                                                                 </div>
                                                             </div>
 
@@ -528,7 +535,7 @@ export function AdvancedView({ lang }: { lang: Language }) {
                                             }
 
                                             // Theoretical Chunk Size Calculation
-                                            const theoretical = Math.round((ctxInt - 500) / cotRatio * 1.3);
+                                            const theoretical = Math.round((ctxInt * 0.9 - 500) / cotRatio * 1.3);
 
                                             // Limits:
                                             // - Warning Threshold: 3072
@@ -669,7 +676,7 @@ export function AdvancedView({ lang }: { lang: Language }) {
                                             const slope = (3.2 - 3.5) / (8192 - 1024);
                                             cotRatio = 3.5 + slope * (ctxInt - 1024);
                                         }
-                                        const theoretical = Math.round((ctxInt - 500) / cotRatio * 1.3);
+                                        const theoretical = Math.round((ctxInt * 0.9 - 500) / cotRatio * 1.3);
                                         const isHardLimited = theoretical > 4096;
 
                                         return isHardLimited && (

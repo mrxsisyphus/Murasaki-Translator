@@ -53,3 +53,11 @@ export const USER_TIPS = {
 } as const
 
 export type Language = 'zh' | 'en' | 'jp'
+
+// Default Post-Processing Rules (matches RuleEditor post_novel preset)
+// Used for system reset to ensure translation works immediately
+export const DEFAULT_POST_RULES = [
+    { id: 'o1', type: 'format', active: true, pattern: 'ensure_double_newline', replacement: '', label: '强制双换行 (轻小说)' },
+    { id: 'o2', type: 'format', active: true, pattern: 'smart_quotes', replacement: '', label: '统一引号格式' }
+] as const
+

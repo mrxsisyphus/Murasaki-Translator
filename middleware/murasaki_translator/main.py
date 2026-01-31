@@ -199,6 +199,7 @@ def translate_block_with_retry(
     last_missed_terms = []
     last_coverage = 0.0
     best_result = None
+    retry_history = []  # Track all retry attempts for debugging
     
     final_output = None
 
@@ -257,6 +258,7 @@ def translate_block_with_retry(
             if global_attempts < args.max_retries:
                 global_attempts += 1
                 retry_reason = 'empty'
+                retry_history.append({'attempt': global_attempts, 'type': 'empty', 'raw_output': raw_output or ''})
                 safe_print_json("JSON_RETRY", {'block': block_idx + 1, 'attempt': global_attempts, 'type': 'empty', 'temp': round(current_temp, 2)})
                 continue
             else: break
@@ -279,6 +281,7 @@ def translate_block_with_retry(
             if global_attempts < args.max_retries:
                 global_attempts += 1
                 retry_reason = error_type
+                retry_history.append({'attempt': global_attempts, 'type': error_type, 'src_lines': src_line_count, 'dst_lines': dst_line_count, 'raw_output': raw_output or ''})
                 safe_print_json("JSON_RETRY", {'block': block_idx + 1, 'attempt': global_attempts, 'type': error_type, 'src_lines': src_line_count, 'dst_lines': dst_line_count, 'temp': round(current_temp, 2)})
                 continue
             else: break
@@ -299,6 +302,7 @@ def translate_block_with_retry(
                 if glossary_attempts < args.coverage_retries:
                     glossary_attempts += 1
                     retry_reason = 'glossary'
+                    retry_history.append({'attempt': glossary_attempts, 'type': 'glossary', 'coverage': round(coverage, 1), 'missed_count': len(last_missed_terms)})
                     safe_print_json("JSON_RETRY", {
                         'block': block_idx + 1, 'attempt': glossary_attempts, 'type': 'glossary',
                         'coverage': round(coverage, 1), 'temp': round(current_temp, 2),
@@ -351,7 +355,8 @@ def translate_block_with_retry(
         "chars_count": len(original_src_text),
         "cot_chars": len(final_output["cot"]),
         "usage": final_output["usage"],
-        "protector_stats": protector.get_stats() if protector else None
+        "protector_stats": protector.get_stats() if protector else None,
+        "retry_history": retry_history  # For debugging: all retry attempts
     }
 
 
@@ -870,9 +875,31 @@ def main():
         seed=args.seed
     )
     
+    # --- Smart Chunk Size Reduction for Structured Formats ---
+    # These formats have significant token overhead that the chunker (char-based) cannot account for.
+    effective_chunk_size = args.chunk_size
+    
+    # 1. Alignment Mode: @id=X@ content @id=X@ anchors
+    # Token overhead analysis:
+    #   - Each @id=123@ ≈ 5-6 tokens (Qwen3)
+    #   - Double anchor per line = ~12 tokens overhead
+    #   - For short manga lines (~10 chars content), anchors add ~40% token overhead
+    #   - Model must reproduce anchors in output, doubling effective overhead
+    # Use 40% reduction (0.6x) to compensate, similar to ASS handling
+    if args.alignment_mode:
+        effective_chunk_size = int(args.chunk_size * 0.6)
+        print(f"[Auto-Config] Alignment mode: chunk_size {args.chunk_size} -> {effective_chunk_size} (anchor overhead compensation)")
+    
+    # 2. ASS/SSA: Pseudo-SRT format with timestamps, indices
+    # ~60-70% structural overhead, use 50% reduction
+    elif file_ext.lower() in ['.ass', '.ssa']:
+        effective_chunk_size = int(args.chunk_size * 0.5)
+        print(f"[Auto-Config] ASS format: chunk_size {args.chunk_size} -> {effective_chunk_size} (pseudo-SRT overhead)")
+
+    
     chunker = Chunker(
-        target_chars=args.chunk_size, 
-        max_chars=args.chunk_size * 2, # Soft limit doubled for buffer
+        target_chars=effective_chunk_size, 
+        max_chars=effective_chunk_size * 2, # Soft limit doubled for buffer
         mode=args.mode,
         enable_balance=args.balance_enable,
         balance_threshold=args.balance_threshold,
@@ -1506,7 +1533,7 @@ def main():
                             
                             if translation_cache:
                                 w_types = [w['type'] for w in res["warnings"]] if res["warnings"] else []
-                                translation_cache.add_block(next_write_idx, res["src_text"], res["preview_text"], w_types, res["cot"])
+                                translation_cache.add_block(next_write_idx, res["src_text"], res["preview_text"], w_types, res["cot"], res.get("retry_history", []))
                             
                             # Write to txt stream
                             f_out.write(res["out_text"] + "\n")

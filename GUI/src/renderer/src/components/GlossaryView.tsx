@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react"
-import { BookOpen, FileJson, FileText, FolderOpen, RefreshCw, Pen, Trash2, Save, Plus, X, Sparkles, FileUp, AlertTriangle } from "lucide-react"
+import { BookOpen, FileJson, FileText, FolderOpen, RefreshCw, Pen, Trash2, Save, Plus, X, Sparkles, FileUp, AlertTriangle, Wand2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, Button } from "./ui/core"
 import { translations, Language } from "../lib/i18n"
 import { GlossaryConverter } from "./GlossaryConverter"
+import { TermExtractModal } from "./TermExtractModal"
 import { AlertModal } from "./ui/AlertModal"
 import { useAlertModal } from "../hooks/useAlertModal"
 
@@ -23,6 +24,7 @@ export function GlossaryView({ lang }: { lang: Language }) {
     const [editableEntries, setEditableEntries] = useState<Array<{ src: string, dst: string }>>([])
     const [originalFormat, setOriginalFormat] = useState<'dict' | 'list'>('dict')
     const [converterInitialFile, setConverterInitialFile] = useState<{ name: string, content: string } | null>(null)
+    const [showExtractor, setShowExtractor] = useState(false)
     const { alertProps, showAlert, showConfirm } = useAlertModal()
 
     const fetchGlossaries = async () => {
@@ -313,9 +315,13 @@ export function GlossaryView({ lang }: { lang: Language }) {
                         <FileUp className="w-4 h-4 text-muted-foreground" />
                         {t.glossaryView.import}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setShowConverter(true)} className="gap-2 h-9 bg-amber-500/5 text-amber-600 border-amber-500/20 hover:bg-amber-500/10">
-                        <RefreshCw className="w-4 h-4" />
+                    <Button variant="outline" size="sm" onClick={() => setShowConverter(true)} className="gap-2 h-9">
+                        <RefreshCw className="w-4 h-4 text-muted-foreground" />
                         {t.glossaryConverter?.title || "格式转换"}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setShowExtractor(true)} className="gap-2 h-9">
+                        <Wand2 className="w-4 h-4 text-muted-foreground" />
+                        {lang === 'zh' ? '智能提取' : 'Smart Extract'}
                     </Button>
                     <Button onClick={() => setCreatingNew(true)} className="gap-2 h-9 shadow-lg shadow-primary/20">
                         <Plus className="w-4 h-4" />
@@ -645,6 +651,24 @@ export function GlossaryView({ lang }: { lang: Language }) {
                         setConverterInitialFile(null)
                     }}
                     onSuccess={fetchGlossaries}
+                />
+            )}
+            {showExtractor && (
+                <TermExtractModal
+                    lang={lang}
+                    onClose={() => setShowExtractor(false)}
+                    onImport={async (terms, filename) => {
+                        // Create new glossary with extracted terms using provided filename
+                        const content = JSON.stringify(terms, null, 2)
+                        try {
+                            // @ts-ignore
+                            await window.api.createGlossaryFile({ filename, content })
+                            fetchGlossaries()
+                            showAlert({ title: lang === 'zh' ? '导入成功' : 'Import Success', description: `${terms.length} ${lang === 'zh' ? '个术语已添加到' : 'terms added to'} ${filename}`, variant: 'success' })
+                        } catch (e: any) {
+                            showAlert({ title: lang === 'zh' ? '导入失败' : 'Import Failed', description: e.message, variant: 'destructive' })
+                        }
+                    }}
                 />
             )}
             <AlertModal {...alertProps} />

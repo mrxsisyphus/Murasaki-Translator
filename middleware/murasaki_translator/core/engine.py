@@ -52,9 +52,6 @@ class InferenceEngine:
         # Real-time stats counters (Atomic-like usage in GIL)
         self.generated_chars_count = 0
         self.generated_tokens_count = 0
-        
-        # Cache for robust metrics reporting (prevent flicker on timeout)
-        self.last_kv_metrics = {'kv_usage_ratio': 0.0, 'kv_tokens': 0}
 
 
     def start_server(self):
@@ -205,52 +202,13 @@ class InferenceEngine:
             self.server_log = None
 
     def get_metrics(self) -> dict:
-        """Fetch real-time metrics from /metrics endpoint."""
-        metrics = {}
-        try:
-            # Use direct request to avoid session contention
-            # Timeout set to 1.5s to allow for server latency under load
-            resp = requests.get(f"{self.base_url}/metrics", timeout=1.5)
-            if resp.status_code == 200:
-                data = resp.text
-                new_metrics = {}
-                for line in data.split('\n'):
-                    if 'kv_cache_usage_ratio' in line:
-                        try:
-                            # Usually "llamacpp:kv_cache_usage_ratio 0.123"
-                            # Or "llamacpp_kv_cache_usage_ratio 0.123"
-                            parts = line.strip().split(' ')
-                            if len(parts) >= 2:
-                                new_metrics['kv_usage_ratio'] = float(parts[1])
-                        except: pass
-                    elif 'kv_cache_tokens' in line:
-                        try:
-                            parts = line.strip().split(' ')
-                            if len(parts) >= 2:
-                                new_metrics['kv_tokens'] = int(float(parts[1]))
-                        except: pass
-                
-                # Update cache if we got new valid data
-                if 'kv_tokens' in new_metrics:
-                    self.last_kv_metrics['kv_tokens'] = new_metrics['kv_tokens']
-                if 'kv_usage_ratio' in new_metrics:
-                    self.last_kv_metrics['kv_usage_ratio'] = new_metrics['kv_usage_ratio']
-                    # Fallback calculation if token count missing from live data
-                    if 'kv_tokens' not in new_metrics:
-                         self.last_kv_metrics['kv_tokens'] = int(new_metrics['kv_usage_ratio'] * self.n_ctx)
+        """Fetch real-time metrics for monitoring."""
+        # Only return internal counters for speed calculation
+        return {
+            'internal_chars': self.generated_chars_count,
+            'internal_tokens': self.generated_tokens_count
+        }
 
-        except Exception as e:
-            # On timeout or error, fail silently but potentially use stale data?
-            # Actually, we should just return what we have in cache to ensure continuity
-            logger.debug(f"Metrics fetch failed: {e}")
-            
-        # ALWAYS include the best known KV metrics
-        metrics.update(self.last_kv_metrics)
-            
-        # Always add internal counters for speed calculation
-        metrics['internal_chars'] = self.generated_chars_count
-        metrics['internal_tokens'] = self.generated_tokens_count
-        return metrics
 
     def chat_completion(self, messages: List[Dict], temperature: float = 0.7, stream: bool = True, stream_callback=None, rep_base: float = 1.0, rep_max: float = 1.5, rep_step: float = 0.1, block_id: int = 0) -> str:
         """

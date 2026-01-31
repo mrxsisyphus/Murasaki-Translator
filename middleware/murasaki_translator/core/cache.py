@@ -19,10 +19,13 @@ class CacheBlock:
     status: str = 'processed'   # 状态: none, processed, edited
     warnings: List[str] = None  # 警告列表
     cot: str = ''               # 思维链（调试用）
+    retry_history: List[Dict] = None  # 重试历史（调试用）
     
     def __post_init__(self):
         if self.warnings is None:
             self.warnings = []
+        if self.retry_history is None:
+            self.retry_history = []
     
     @property
     def src_lines(self) -> int:
@@ -45,7 +48,7 @@ class CacheBlock:
         return len(self.dst)
     
     def to_dict(self) -> Dict:
-        return {
+        result = {
             'index': self.index,
             'src': self.src,
             'dst': self.dst,
@@ -55,6 +58,10 @@ class CacheBlock:
             'srcLines': self.src_lines,
             'dstLines': self.dst_lines
         }
+        # Only include retry_history if it has data (saves space)
+        if self.retry_history:
+            result['retryHistory'] = self.retry_history
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'CacheBlock':
@@ -64,7 +71,8 @@ class CacheBlock:
             dst=data.get('dst', ''),
             status=data.get('status', 'processed'),
             warnings=data.get('warnings', []),
-            cot=data.get('cot', '')
+            cot=data.get('cot', ''),
+            retry_history=data.get('retryHistory', [])
         )
 
 
@@ -87,7 +95,7 @@ class TranslationCache:
         self.metadata: Dict = {}
     
     def add_block(self, index: int, src: str, dst: str, 
-                  warnings: List[str] = None, cot: str = '') -> CacheBlock:
+                  warnings: List[str] = None, cot: str = '', retry_history: List[Dict] = None) -> CacheBlock:
         """添加翻译 block"""
         block = CacheBlock(
             index=index,
@@ -95,7 +103,8 @@ class TranslationCache:
             dst=dst,
             status='processed',
             warnings=warnings or [],
-            cot=cot
+            cot=cot,
+            retry_history=retry_history or []
         )
         self.blocks.append(block)
         return block

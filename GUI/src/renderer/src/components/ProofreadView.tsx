@@ -18,11 +18,11 @@ import {
     X,
     ChevronLeft,
     ChevronRight,
-    ArrowRight,
     ChevronUp,
     ChevronDown,
     Regex,
     Replace,
+    AlignJustify,
     ReplaceAll,
     FileCheck,
     FileText,
@@ -113,6 +113,9 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
     // History & Folder Browser
     const [showHistoryModal, setShowHistoryModal] = useState(false)
+
+    // Line Mode - strict line-by-line alignment with line numbers
+    const [lineMode, setLineMode] = useState(true) // Default to line mode
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
     // Sync with parent for navigation guard
@@ -231,9 +234,9 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
     // Shared logic to process loaded cache data and glossary
     const processLoadedData = async (data: any, path: string) => {
-        // Clean tags from DST text immediately on load, but preserve them in warnings array
+        // Clean tags and normalize indices to prevent duplicate key warnings
         if (data.blocks && Array.isArray(data.blocks)) {
-            data.blocks = data.blocks.map((b: any) => {
+            data.blocks = data.blocks.map((b: any, i: number) => {
                 const dst = b.dst || ''
                 const warnings = b.warnings || []
 
@@ -248,7 +251,21 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                 // Strip tags
                 const cleanDst = dst.replace(/(\s*)[(\[]?\b(line_mismatch|high_similarity|kana_residue|glossary_missed|hangeul_residue)\b[)\]]?(\s*)/g, '')
 
-                return { ...b, dst: cleanDst, warnings }
+                // Force sequential unique index if duplicate detected or missing
+                const index = (typeof b.index === 'number') ? b.index : i
+
+                return { ...b, index, dst: cleanDst, warnings }
+            })
+
+            // Additional safety: If we still have potential duplicates in the source, force them to be unique based on array position
+            // This is the strongest protection against the "duplicate key 1" warning
+            const seenIndices = new Set()
+            data.blocks.forEach((b: any, i: number) => {
+                if (seenIndices.has(b.index)) {
+                    console.warn(`[Proofread] Duplicate index detected: ${b.index}. Reassigning to ${i}`)
+                    b.index = i
+                }
+                seenIndices.add(b.index)
             })
         }
 
@@ -627,25 +644,6 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
         })
     }
 
-    // --- In-Place Edit Handlers ---
-
-    const startEdit = (block: CacheBlock) => {
-        setEditingBlockId(block.index)
-        // Normalize text to Light Novel style for editing (Visual \n\n)
-        setEditingText(normalizeLN(block.dst))
-        // Auto-focus logic in useEffect below
-    }
-
-    const saveEdit = (index: number) => {
-        // Enforce formatting on save
-        updateBlockDst(index, normalizeLN(editingText))
-        setEditingBlockId(null)
-    }
-
-    const cancelEdit = () => {
-        setEditingBlockId(null)
-    }
-
     // Auto-focus and resize textarea
     useEffect(() => {
         if (editingBlockId !== null && textareaRef.current) {
@@ -655,6 +653,13 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
             textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
         }
     }, [editingBlockId])
+
+    // Auto-scroll logs to bottom
+    useEffect(() => {
+        if (showLogModal !== null && logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight
+        }
+    }, [blockLogs, showLogModal])
 
     // --- Filtering & Pagination ---
 
@@ -684,6 +689,22 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
         if (block.status === 'edited') return <div className="w-2 h-2 rounded-full bg-blue-500" title="Edited" />
         if (block.status === 'processed') return <div title="Processed"><Check className="w-3 h-3 text-green-500/50" /></div>
         return null
+    }
+
+    // Container ref for scrolling
+    const containerRef = useRef<HTMLDivElement>(null)
+
+    // Grid template for synchronized columns (fixed 50:50 layout)
+    const gridTemplate = '50% 50%'
+
+    // Helper: trim leading empty lines from block text
+    const trimLeadingEmptyLines = (text: string) => {
+        const lines = text.split('\n')
+        let startIdx = 0
+        while (startIdx < lines.length && lines[startIdx].trim() === '') {
+            startIdx++
+        }
+        return lines.slice(startIdx).join('\n')
     }
 
     // Get ALL cache files from translation history
@@ -738,20 +759,24 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
     // Load specific cache file
     const loadCacheFromPath = async (path: string) => {
+        if (!path) return
         setLoading(true)
         try {
+            console.log('[Proofread] Attempting to load cache:', path)
             // @ts-ignore
             const data = await window.api.loadCache(path)
-            if (data) {
+            if (data && data.blocks) {
                 await processLoadedData(data, path)
             } else {
-                throw new Error("Empty data returned")
+                const msg = !data ? "文件不存在或已损坏" : "内容格式不正确 (缺少 blocks)"
+                console.error(`[Proofread] ${msg}:`, path)
+                throw new Error(msg)
             }
         } catch (e) {
             console.error('Failed to load cache:', e)
             showAlert({
                 title: '无法加载校对文件',
-                description: `读取文件失败: ${path}\n${e}`,
+                description: `读取文件失败: ${path}\n原因: ${e instanceof Error ? e.message : String(e)}`,
                 variant: 'destructive'
             })
         } finally {
@@ -858,13 +883,15 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
     }
 
     // Helper to highlight text with search and line warnings
-    const HighlightText = ({ text, keyword, warningLines, isDoubleSpace = true }: { text: string, keyword: string, warningLines?: Set<number>, isDoubleSpace?: boolean }) => {
+    const HighlightText = ({ text, keyword, warningLines, isDoubleSpace = true, showLineNumbers = false }: { text: string, keyword: string, warningLines?: Set<number>, isDoubleSpace?: boolean, showLineNumbers?: boolean }) => {
         if (!text) return null
 
         const lines = text.split(/\r?\n/)
+        // In line mode, show all lines including empty ones for strict alignment
+        const effectiveDoubleSpace = showLineNumbers ? false : isDoubleSpace
 
         return (
-            <div className="flex flex-col w-full">
+            <div className={`flex flex-col w-full ${showLineNumbers ? 'font-mono text-[13px]' : ''}`}>
                 {lines.map((line, idx) => {
                     // Check if this line is in warnings (1-based index in set)
                     const isWarning = warningLines?.has(idx + 1)
@@ -872,7 +899,7 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
 
                     // Search highlight logic
                     const renderContent = () => {
-                        if (!keyword || !line) return line || <br />
+                        if (!keyword || !line) return line || (showLineNumbers ? '\u00A0' : <br />)
                         try {
                             const flags = isRegex ? 'gi' : 'i'
                             const pattern = isRegex ? keyword : keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -886,11 +913,9 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                         } catch { return line }
                     }
 
-                    // Strict Light Novel Spacing:
-                    // 1. Hide original empty lines (normalize format)
-                    // 2. Add fixed spacing below text lines
-
-                    if (isDoubleSpace && isEmpty) {
+                    // In line mode, show all lines for strict alignment
+                    // In block mode, hide empty lines and add spacing
+                    if (effectiveDoubleSpace && isEmpty) {
                         return <div key={idx} className="hidden" />
                     }
 
@@ -898,12 +923,19 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                         <div
                             key={idx}
                             className={`
-                                w-full break-words whitespace-pre-wrap min-h-[1.5em]
-                                ${isWarning ? 'bg-amber-500/20 -mx-2 px-2 rounded' : ''}
-                                ${isDoubleSpace ? 'mb-6' : ''}
+                                flex items-start gap-2
+                                ${isWarning ? 'bg-amber-500/20 rounded' : ''}
+                                ${effectiveDoubleSpace ? 'mb-6' : 'min-h-[1.5em]'}
                             `}
                         >
-                            {renderContent()}
+                            {showLineNumbers && (
+                                <span className="w-7 shrink-0 text-right text-[10px] text-muted-foreground/50 select-none pt-0.5">
+                                    {idx + 1}
+                                </span>
+                            )}
+                            <span className={`flex-1 break-words whitespace-pre-wrap text-foreground ${showLineNumbers ? '' : 'w-full'}`}>
+                                {renderContent()}
+                            </span>
                         </div>
                     )
                 })}
@@ -995,6 +1027,13 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                         >
                             <Filter className="w-3.5 h-3.5" />
                         </button>
+                        <button
+                            onClick={() => setLineMode(!lineMode)}
+                            className={`p-1 rounded text-xs ${lineMode ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                            title={lineMode ? '行模式 (点击切换段落模式)' : '段落模式 (点击切换行模式)'}
+                        >
+                            <AlignJustify className="w-3.5 h-3.5" />
+                        </button>
                     </div>
 
                     {/* Right Actions */}
@@ -1061,12 +1100,11 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                 )}
 
                 {/* --- Main Content: Grid Layout --- */}
-                <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-border">
+                <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-border">
                     {/* Header Row */}
-                    <div className="sticky top-0 z-20 grid grid-cols-[1fr_40px_1fr] bg-muted/80 backdrop-blur border-b text-xs font-medium text-muted-foreground">
-                        <div className="px-6 py-2">原文 (Source)</div>
-                        <div className="flex items-center justify-center border-l border-r border-border/50">#</div>
-                        <div className="px-6 py-2">译文 (Translation)</div>
+                    <div className="sticky top-0 z-20 grid bg-muted/80 backdrop-blur border-b text-xs font-medium text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
+                        <div className="px-4 py-2 border-r border-border/50">原文 (Source)</div>
+                        <div className="px-4 py-2">译文 (Translation)</div>
                     </div>
 
                     {/* Blocks */}
@@ -1076,93 +1114,235 @@ export default function ProofreadView({ t, lang, onUnsavedChangesChange }: Proof
                             const simLines = findHighSimilarityLines(block.src, block.dst)
                             const simSet = new Set(simLines)
 
+                            // In line mode, render line-by-line with synchronized heights
+                            const srcLines = trimLeadingEmptyLines(block.src).split('\n')
+                            const dstText = editingBlockId === block.index ? editingText : trimLeadingEmptyLines(block.dst)
+                            const dstLines = dstText.split('\n')
+
                             return (
                                 <div
                                     key={block.index}
                                     id={`block-${block.index}`}
-                                    className={`group grid grid-cols-[1fr_40px_1fr] min-h-[80px] hover:bg-muted/30 transition-colors ${editingBlockId === block.index ? 'bg-muted/30' : ''}`}
+                                    className={`group hover:bg-muted/30 transition-colors ${editingBlockId === block.index ? 'bg-muted/30' : ''}`}
                                 >
-                                    {/* Left: Source */}
-                                    <div className="p-6 text-sm leading-relaxed whitespace-pre-wrap font-sans text-foreground/80 select-text">
-                                        <HighlightText text={block.src} keyword={searchKeyword} warningLines={simSet} />
-                                    </div>
-
-                                    {/* Middle: Gutter */}
-                                    <div className="flex flex-col items-center py-6 border-l border-r border-border/30 bg-muted/5 gap-2 select-none group-hover:bg-muted/10 transition-colors">
-                                        <span className="text-xs font-mono text-muted-foreground/50">{block.index + 1}</span>
+                                    {/* Block header with info and actions */}
+                                    <div className="flex items-center gap-2 px-3 py-1 border-b border-border/10 bg-muted/20">
+                                        <span className="text-[10px] text-muted-foreground/50 font-mono">#{block.index + 1}</span>
                                         <StatusIndicator block={block} />
-
-                                        {/* Gutter Actions */}
-                                        <div className="mt-auto flex flex-col gap-2">
+                                        <button
+                                            onClick={() => retranslateBlock(block.index)}
+                                            className={`w-5 h-5 flex items-center justify-center rounded transition-all opacity-0 group-hover:opacity-100 ${loading ? 'text-muted-foreground' : 'text-primary/50 hover:text-primary hover:bg-primary/10'}`}
+                                            title="重新翻译此块"
+                                            disabled={loading}
+                                        >
+                                            <RefreshCw className={`w-3 h-3 ${retranslatingBlocks.has(block.index) ? 'animate-spin' : ''}`} />
+                                        </button>
+                                        {/* Log button - show when block has logs */}
+                                        {blockLogs[block.index]?.length > 0 && (
                                             <button
-                                                onClick={() => retranslateBlock(block.index)}
-                                                className={`
-                                                    w-7 h-7 flex items-center justify-center rounded-full transition-all shadow-sm
-                                                    ${loading ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white hover:scale-110 active:scale-95'}
-                                                    opacity-0 group-hover:opacity-100
-                                                `}
-                                                title="重新翻译此块"
-                                                disabled={loading}
+                                                onClick={() => setShowLogModal(block.index)}
+                                                className="w-5 h-5 flex items-center justify-center rounded transition-all text-blue-500/70 hover:text-blue-500 hover:bg-blue-500/10"
+                                                title="查看翻译日志"
                                             >
-                                                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                                                <Terminal className="w-3 h-3" />
                                             </button>
-
-                                            {blockLogs[block.index] && (
-                                                <button
-                                                    onClick={() => setShowLogModal(block.index)}
-                                                    className={`
-                                                        w-7 h-7 flex items-center justify-center rounded-full transition-all shadow-sm
-                                                        bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white hover:scale-110 active:scale-95
-                                                        ${loading && editingBlockId === null ? 'animate-pulse' : ''}
-                                                    `}
-                                                    title="查看重翻推理日志 (Virtual Log)"
-                                                >
-                                                    <Terminal className="w-3.5 h-3.5" />
-                                                </button>
-                                            )}
-                                        </div>
+                                        )}
                                     </div>
 
-                                    {/* Right: Translation */}
-                                    <div className="relative p-6 text-sm leading-relaxed">
-                                        {editingBlockId === block.index ? (
-                                            <div className="relative">
+                                    {/* Content area: 2-column grid */}
+                                    {lineMode ? (
+                                        // Line Mode: Flattened grid items for perfect line synchronization
+                                        <div className="grid relative" style={{ gridTemplateColumns: gridTemplate }}>
+                                            {/* We iterate through lines and render them as FLAT direct children of the grid */}
+                                            {srcLines.map((srcLine, lineIdx) => {
+                                                const dstLine = dstLines[lineIdx] || ''
+                                                const isWarning = simSet.has(lineIdx + 1)
+
+                                                const highlightLine = (text: string) => {
+                                                    if (!searchKeyword || !text) return text || '\u00A0'
+                                                    try {
+                                                        const flags = isRegex ? 'gi' : 'i'
+                                                        const pattern = isRegex ? searchKeyword : searchKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                                        const regex = new RegExp(`(${pattern})`, flags)
+                                                        const parts = text.split(regex)
+                                                        return (
+                                                            <>
+                                                                {parts.map((part, i) => regex.test(part) ? <span key={i} className="bg-yellow-300 text-black rounded-none" style={{ padding: 0, margin: 0, lineHeight: 'inherit', display: 'inline' }}>{part}</span> : part)}
+                                                            </>
+                                                        )
+                                                    } catch { return text }
+                                                }
+
+                                                return (
+                                                    <div key={lineIdx} style={{ display: 'contents' }}>
+                                                        {/* Left: Source Cell */}
+                                                        <div
+                                                            className={`relative border-r border-border/20 ${isWarning ? 'bg-amber-500/20' : ''}`}
+                                                            style={{
+                                                                minHeight: '20px',
+                                                                paddingLeft: '44px', // 12px (outer) + 24px (w-6) + 8px (gap)
+                                                                paddingRight: '12px',
+                                                                lineHeight: '20px',
+                                                                fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
+                                                                fontSize: '13px',
+                                                                fontWeight: 400,
+                                                                letterSpacing: '0',
+                                                                wordBreak: 'break-all',
+                                                                WebkitFontSmoothing: 'subpixel-antialiased',
+                                                                textRendering: 'geometricPrecision',
+                                                                fontVariantLigatures: 'none',
+                                                                fontKerning: 'none'
+                                                            }}
+                                                        >
+                                                            <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
+                                                            <span className="whitespace-pre-wrap text-foreground select-text">{highlightLine(srcLine)}</span>
+                                                        </div>
+                                                        {/* Right: Translation Display Cell */}
+                                                        <div
+                                                            className={`relative ${isWarning ? 'bg-amber-500/20' : ''}`}
+                                                            style={{
+                                                                minHeight: '20px',
+                                                                paddingLeft: '44px',
+                                                                paddingRight: '12px',
+                                                                lineHeight: '20px',
+                                                                fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
+                                                                fontSize: '13px',
+                                                                fontWeight: 400,
+                                                                letterSpacing: '0',
+                                                                wordBreak: 'break-all',
+                                                                WebkitFontSmoothing: 'subpixel-antialiased',
+                                                                textRendering: 'geometricPrecision',
+                                                                fontVariantLigatures: 'none',
+                                                                fontKerning: 'none'
+                                                            }}
+                                                        >
+                                                            <span style={{ position: 'absolute', left: '12px', width: '24px', textAlign: 'right', fontSize: '10px', color: 'hsl(var(--muted-foreground)/0.5)', userSelect: 'none', lineHeight: '20px' }}>{lineIdx + 1}</span>
+                                                            <span className="whitespace-pre-wrap text-foreground select-text">{highlightLine(dstLine)}</span>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+
+                                            {/* Transparent textarea overlay - now properly aligned because grid rows share high */}
+                                            <textarea
+                                                className="absolute right-0 top-0 w-1/2 h-full bg-transparent outline-none resize-none cursor-text border-none m-0"
+                                                style={{
+                                                    color: 'transparent',
+                                                    caretColor: 'hsl(var(--primary))',
+                                                    paddingLeft: '44px',
+                                                    paddingRight: '12px',
+                                                    paddingTop: '1px', // Crucial: Fixes the 1px baseline shift in standard textareas
+                                                    paddingBottom: '0',
+                                                    lineHeight: '20px',
+                                                    fontFamily: '"Cascadia Mono", Consolas, "Meiryo", "MS Gothic", "SimSun", "Courier New", monospace',
+                                                    fontSize: '13px',
+                                                    fontWeight: 400,
+                                                    letterSpacing: '0',
+                                                    wordSpacing: '0',
+                                                    wordBreak: 'break-all',
+                                                    whiteSpace: 'pre-wrap',
+                                                    WebkitFontSmoothing: 'subpixel-antialiased',
+                                                    textRendering: 'geometricPrecision',
+                                                    boxSizing: 'border-box',
+                                                    fontVariantLigatures: 'none',
+                                                    fontKerning: 'none',
+                                                    overflow: 'hidden'
+                                                }}
+                                                value={dstText}
+                                                onChange={e => {
+                                                    setEditingText(e.target.value)
+                                                    setHasUnsavedChanges(true)
+                                                }}
+                                                onFocus={() => {
+                                                    setEditingBlockId(block.index)
+                                                    setEditingText(dstText)
+                                                }}
+                                                onBlur={(e) => {
+                                                    // Sync to global state only on blur to avoid lag
+                                                    const newValue = e.target.value
+                                                    setCacheData(prev => {
+                                                        if (!prev) return prev
+                                                        const newBlocks = [...prev.blocks]
+                                                        const targetIdx = newBlocks.findIndex(b => b.index === block.index)
+                                                        if (targetIdx !== -1) {
+                                                            newBlocks[targetIdx] = { ...newBlocks[targetIdx], dst: newValue, status: 'edited' }
+                                                        }
+                                                        return { ...prev, blocks: newBlocks }
+                                                    })
+                                                    setHasUnsavedChanges(true)
+                                                    setEditingBlockId(null)
+                                                }}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Escape') {
+                                                        e.currentTarget.blur()
+                                                    }
+                                                    // Ctrl+Enter or Cmd+Enter to save (blur triggers save)
+                                                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                        e.preventDefault()
+                                                        e.currentTarget.blur()
+                                                    }
+                                                }}
+                                                spellCheck={false}
+                                            />
+                                        </div>
+                                    ) : (
+                                        // Block Mode: Original layout
+                                        <div className="grid relative" style={{ gridTemplateColumns: gridTemplate }}>
+                                            <div className="px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground select-text overflow-x-auto border-r border-border/20">
+                                                <HighlightText text={trimLeadingEmptyLines(block.src)} keyword={searchKeyword} warningLines={simSet} showLineNumbers={false} />
+                                            </div>
+                                            <div className="relative px-3 py-2 text-sm leading-relaxed overflow-x-auto cursor-text">
+                                                <HighlightText
+                                                    text={dstText}
+                                                    keyword={searchKeyword}
+                                                    warningLines={simSet}
+                                                    showLineNumbers={false}
+                                                />
+                                                {/* Transparent textarea overlay for seamless editing */}
                                                 <textarea
-                                                    ref={textareaRef}
-                                                    className="w-full bg-background border rounded-md p-6 text-sm leading-relaxed outline-none ring-2 ring-primary/20 resize-none font-sans"
-                                                    value={editingText}
+                                                    className="absolute inset-0 px-3 py-2 bg-transparent border-none outline-none resize-none"
+                                                    style={{
+                                                        lineHeight: 'inherit',
+                                                        color: 'transparent',
+                                                        caretColor: 'hsl(var(--primary))'
+                                                    }}
+                                                    value={dstText}
                                                     onChange={e => {
-                                                        setEditingText(e.target.value)
-                                                        e.target.style.height = 'auto'
-                                                        e.target.style.height = e.target.scrollHeight + 'px'
+                                                        if (editingBlockId === block.index) {
+                                                            setEditingText(e.target.value)
+                                                        }
+                                                    }}
+                                                    onFocus={() => {
+                                                        setEditingBlockId(block.index)
+                                                        setEditingText(trimLeadingEmptyLines(block.dst))
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        const newText = e.target.value
+                                                        if (newText !== trimLeadingEmptyLines(block.dst)) {
+                                                            setCacheData(prev => {
+                                                                if (!prev) return prev
+                                                                const newBlocks = [...prev.blocks]
+                                                                const targetIdx = newBlocks.findIndex(b => b.index === block.index)
+                                                                if (targetIdx !== -1) {
+                                                                    newBlocks[targetIdx] = { ...newBlocks[targetIdx], dst: newText, status: 'edited' }
+                                                                }
+                                                                return { ...prev, blocks: newBlocks }
+                                                            })
+                                                            setHasUnsavedChanges(true)
+                                                        }
+                                                        setEditingBlockId(null)
                                                     }}
                                                     onKeyDown={e => {
-                                                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                                            saveEdit(block.index)
-                                                        }
                                                         if (e.key === 'Escape') {
-                                                            cancelEdit()
+                                                            e.preventDefault()
+                                                            e.currentTarget.blur()
                                                         }
                                                     }}
+                                                    spellCheck={false}
                                                 />
-                                                <div className="flex items-center justify-end gap-2 mt-2">
-                                                    <span className="text-xs text-muted-foreground hidden sm:inline-block">Ctrl+Enter to save</span>
-                                                    <Button size="sm" variant="ghost" className="h-7 px-2" onClick={cancelEdit}><X className="w-3 h-3" /></Button>
-                                                    <Button size="sm" className="h-7 px-3" onClick={() => saveEdit(block.index)}><ArrowRight className="w-3 h-3 mr-1" /> Save</Button>
-                                                </div>
                                             </div>
-                                        ) : (
-                                            <div
-                                                onClick={() => startEdit(block)}
-                                                className="cursor-text min-h-[1.5em] outline-none rounded-sm -m-1 p-1 hover:ring-1 hover:ring-border transition-all"
-                                                title="点击编辑"
-                                            >
-                                                <HighlightText text={block.dst} keyword={searchKeyword} warningLines={simSet} />
-                                            </div>
-                                        )}
-                                        {/* Warns overlay removed to prevent duplication */}
-                                        {null}
-                                    </div>
+                                        </div>
+                                    )}
                                 </div>
                             )
                         })}

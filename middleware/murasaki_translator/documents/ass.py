@@ -83,8 +83,8 @@ class AssDocument(BaseDocument):
                     srt_start = self._ass_time_to_srt(start_time)
                     srt_end = self._ass_time_to_srt(end_time)
                     
-                    # Context Injection: Add Speaker/Style info to guide the model
-                    # Format: [Speaker: Name] (Style: Style)\nOriginal Text
+                    # Context Injection: Add Speaker/Style info INLINE to guide the model
+                    # Format: [Speaker](Style) Original Text (Single line to maintain line count stability)
                     context_prefix = ""
                     if actor_name:
                         context_prefix += f"[{actor_name}]"
@@ -92,7 +92,7 @@ class AssDocument(BaseDocument):
                         context_prefix += f"({style_name})"
                     
                     if context_prefix:
-                         final_prompt_text = f"{context_prefix}\n{raw_text}"
+                         final_prompt_text = f"{context_prefix} {raw_text}"  # INLINE, not newline
                     else:
                          final_prompt_text = raw_text
 
@@ -162,11 +162,9 @@ class AssDocument(BaseDocument):
                 
             # Cleanups
             
-            # 0. Strip Context lines (Metadata) that we injected
-            # Matches optional [Name] and (Style) at the very start of the text
-            # We use non-greedy matching.
-            # Handles cases like: "[A]\nText", "[A](B)\nText", "(B)\nText"
-            trans_text = re.sub(r'^(?:\[.*?\])?(?:\(.*?\))?\s*\n?', '', trans_text).strip()
+            # 0. Strip Context metadata (Speaker/Style) that we injected inline
+            # Matches: [Name](Style) or [Name] or (Style) at the start of the text
+            trans_text = re.sub(r'^(?:\[.*?\])?(?:\(.*?\))?\s*', '', trans_text).strip()
 
             # 1. Remove potential hallucinations like "\N\N52\N" inside the text
             #    (Though regex content extraction usually avoids the next index, internal numbers might stay)

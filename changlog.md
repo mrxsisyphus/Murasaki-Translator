@@ -1,5 +1,36 @@
 # Murasaki Translator - Changelog
 
+## [1.4.0] - 2026-01-31
+
+### 术语表自动提取 (Term Extraction)
+- **一键术语提取 (One-Click Extract)**:
+    - 新增独立的术语表提取工具 (`term_extractor.py`)，支持从 TXT/EPUB/SRT/ASS 等格式中自动识别高频词汇和专有名词。
+    - **智能过滤算法**: 内置停用词过滤、假名占比过滤、英文通用词过滤等多重策略，有效剔除无意义词汇。
+
+### 校对界面重构 (Proofread View Refactor)
+- **Line Mode 布局**:
+    - 引入 `display: grid` + `contents` 技巧实现原文/译文的**严格行对齐**。解决了长久以来"一段原文对应多行译文"导致的高度错位问题。
+    - 重构了索引管理逻辑，支持缓存文件索引混乱时的自动修复。
+- **视觉优化**:
+    - 优化了编辑区域的滚动行为和行号显示。
+
+### 分块大小优化 (Chunk Size Optimization)
+- **安全余量公式**:
+    - 优化了 `ctx → chunk_size` 的自动换算公式，新增 **10% 安全余量** (`ctx * 0.9`)，有效防止边界情况下的输出截断。
+    - 同步更新了 Dashboard 和 AdvancedView 的显示逻辑，确保 UI 与实际计算一致。
+
+### 核心修复与优化 (Fixes & Optimization)
+- **ASS 字幕优化**:
+    - 将 `[Speaker]\nText` 改为 `[Speaker] Text` 行内注入格式，减少 Token 消耗并降低模型将角色名视为独立行翻译的概率。
+- **AdvancedView 状态锁**:
+    - 新增 `isLoaded` 状态锁，防止组件挂载瞬间由于 State 初始化导致的配置被错误覆盖（如 Context Size 被重置）。
+- **Recharts 警告修复**:
+    - 为图表组件添加 `active` 属性检查，解决了隐藏 Tab 中 `ResponsiveContainer` 尺寸为 0 时的控制台警告。
+- **Parser 空行保留**:
+    - 移除了末尾空行清理逻辑，确保 SRT/ASS 字幕的单元分隔符正确保留。
+
+---
+
 ## [1.3.0] - 2026-01-30
 
 ### 资源库与高级队列管理 (Library & Advanced Queue)

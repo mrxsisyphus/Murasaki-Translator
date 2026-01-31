@@ -44,9 +44,8 @@ pandas>=2.2.0
 numpy>=1.26.0
 jieba>=0.42.1  # Chinese tokenization for ACGN content
 
-# Japanese NLP (for Glossary Injection Pipeline)
-sudachipy>=0.6.8
-sudachidict-core>=20240109
+# Japanese NLP (for Glossary Extraction & Injection Pipeline)
+# fugashi: MeCab wrapper for Japanese morphological analysis
 fugashi>=1.3.0
 unidic-lite>=1.0.8
 

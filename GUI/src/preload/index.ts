@@ -65,6 +65,13 @@ const api = {
     onRetranslateLog: (callback: (data: { index: number, text: string, isError?: boolean }) => void) =>
         ipcRenderer.on('retranslate-log', (_event, value) => callback(value)),
     removeRetranslateLogListener: () => ipcRenderer.removeAllListeners('retranslate-log'),
+
+    // Term Extraction
+    extractTerms: (options: { filePath?: string, text?: string, topK?: number }) =>
+        ipcRenderer.invoke('extract-terms', options),
+    onTermExtractProgress: (callback: (progress: number) => void) =>
+        ipcRenderer.on('term-extract-progress', (_event, value) => callback(value)),
+    removeTermExtractProgressListener: () => ipcRenderer.removeAllListeners('term-extract-progress'),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

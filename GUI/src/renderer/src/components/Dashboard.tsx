@@ -282,38 +282,45 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
 
         window.api?.showNotification('Murasaki Translator', success ? '翻译完成！' : '翻译已停止')
 
-        // Use refs for stable access to current values
         const queueIndex = currentQueueIndexRef.current
         const queue = queueRef.current
 
-        if (success && queueIndex < queue.length - 1) {
-            // Mark current file as completed locally and in persistent queue
-            setCompletedFiles(prev => new Set(prev).add(queue[queueIndex].path))
-            setQueue(prev => prev.map((item, i) => i === queueIndex ? { ...item, status: 'completed' } : item))
-
-            // Continue with next file in queue
-            const nextIndex = queueIndex + 1
-
-            // IMPORTANT: Use prepareAndCheckRef to perform existence check before overwriting!
-            // Do not startTranslation directly. This avoids the stale closure bug and unintentional overwrites.
-            setTimeout(() => {
-                checkAndStartRef.current(queue[nextIndex].path, nextIndex)
-            }, 1000)
-        } else {
-            // All done or stopped
-            if (success && queueIndex >= 0 && queue[queueIndex]) {
-                // Mark last file as completed locally and in persistent queue
-                setCompletedFiles(prev => new Set(prev).add(queue[queueIndex].path))
+        if (success && Array.isArray(queue) && queueIndex >= 0 && queueIndex < queue.length) {
+            const currentItem = queue[queueIndex]
+            if (currentItem && queueIndex < queue.length - 1) {
+                // Continue to next file in queue
+                const nextIndex = queueIndex + 1
+                setCompletedFiles(prev => {
+                    const next = new Set(prev)
+                    if (currentItem.path) next.add(currentItem.path)
+                    return next
+                })
                 setQueue(prev => prev.map((item, i) => i === queueIndex ? { ...item, status: 'completed' } : item))
-            }
-            setCurrentQueueIndex(-1)
-            if (success && queue.length > 1) {
-                window.api?.showNotification('Murasaki Translator', `全部 ${queue.length} 个文件翻译完成！`)
-            }
-            // Reset progress to show completion state
-            if (success) {
+
+                setTimeout(() => {
+                    if (queue[nextIndex]) {
+                        checkAndStartRef.current(queue[nextIndex].path, nextIndex)
+                    }
+                }, 1000)
+            } else if (currentItem) {
+                // Last file completed (or single file)
+                setCompletedFiles(prev => {
+                    const next = new Set(prev)
+                    if (currentItem.path) next.add(currentItem.path)
+                    return next
+                })
+                setQueue(prev => prev.map((item, i) => i === queueIndex ? { ...item, status: 'completed' } : item))
+                setCurrentQueueIndex(-1)
+                if (queue.length > 1) {
+                    window.api?.showNotification('Murasaki Translator', `全部 ${queue.length} 个文件翻译完成！`)
+                }
                 setProgress(prev => ({ ...prev, percent: 100 }))
+            } else {
+                setCurrentQueueIndex(-1)
             }
+        } else {
+            // Interrupted or index out of range
+            setCurrentQueueIndex(-1)
         }
     }, []) // Empty deps - uses refs for values
 
@@ -707,7 +714,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
     const handleClearQueue = useCallback(() => {
         showConfirm({
             title: t.dashboard.clear,
-            description: (t as any).confirmClear || "Are you sure you want to clear the translation queue?",
+            description: (t as any).confirmClear || "确定要清空全部翻译队列吗？",
             variant: 'destructive',
             onConfirm: () => {
                 setQueue([])
@@ -812,10 +819,12 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
             }
         } catch (e) { console.error("Failed to load library config:", e) }
 
-        // 根据 ctx 自动计算 chunk-size：公式 (ctx - 500) / 3.5 * 1.3 (Qwen Token Density)
+        // 根据 ctx 自动计算 chunk-size
         const ctxValue = customConfig.contextSize || parseInt(localStorage.getItem("config_ctx") || "4096")
-        // 根据 ctx 自动计算 chunk-size：公式 (ctx - 500) / 3.5 * 1.3 (Qwen Token Density)
-        const calculatedChunkSize = Math.max(200, Math.min(3072, Math.floor(((ctxValue - 500) / 3.5) * 1.3)))
+        // 公式：(ctx * 0.9 - 500) / 3.5 * 1.3
+        //   - 0.9: 10% 安全余量，防止边界情况截断
+        //   - 其余与原公式相同，保持经验验证的参数
+        const calculatedChunkSize = Math.max(200, Math.min(3072, Math.floor(((ctxValue * 0.9 - 500) / 3.5) * 1.3)))
 
         // Get Model Path
         const modelPath = localStorage.getItem("config_model")
@@ -940,6 +949,8 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
         path: string
         onResume: () => void
         onOverwrite: () => void
+        onSkip?: () => void
+        onStopAll?: () => void
         onCancel: () => void
     } | null>(null)
 
@@ -970,28 +981,20 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
             // Other fields not needed for path resolution
         }
 
-        const checkResult = await window.api?.checkOutputFileExists(inputPath, config)
 
-        // --- Auto-Match Glossary Logic ---
-        // Heuristic: Check if a glossary file exists with the same name as the input file (json or txt)
-        // If so, automatically set it and notify the user.
+        // --- Auto-Match Glossary Logic (Refined) ---
         let matchedGlossary = ''
-        try {
-            const inputName = inputPath.split(/[/\\]/).pop()?.split('.').slice(0, -1).join('.')
-            if (inputName && glossaries.length > 0) {
-                // Find potential match (case-insensitive usually good, but let's stick to simple includes first)
-                const match = glossaries.find(g => {
-                    const gName = g.split('.').slice(0, -1).join('.')
-                    return gName === inputName
-                })
-
-                if (match && match !== glossaryPath) {
-                    matchedGlossary = match
-                    setGlossaryPath(match)
-                    window.api?.showNotification(t.glossaryView.autoMatchTitle, (t.glossaryView.autoMatchMsg || "").replace('{name}', match))
-                }
+        const inputName = inputPath.split(/[/\\]/).pop()?.split('.').slice(0, -1).join('.')
+        if (inputName && glossaries.length > 0) {
+            const match = glossaries.find(g => g.split('.').slice(0, -1).join('.') === inputName)
+            if (match && match !== glossaryPath) {
+                matchedGlossary = match
+                setGlossaryPath(match)
+                window.api?.showNotification(t.glossaryView.autoMatchTitle, (t.glossaryView.autoMatchMsg || "").replace('{name}', match))
             }
-        } catch (e) { console.error("Auto-match glossary error", e) }
+        }
+
+        const checkResult = await window.api?.checkOutputFileExists(inputPath, config)
 
         if (checkResult?.exists && checkResult.path) {
             setConfirmModal({
@@ -1009,8 +1012,18 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
                     setCurrentQueueIndex(index)
                     startTranslation(inputPath, false, matchedGlossary || undefined)
                 },
+                onSkip: index < queue.length - 1 ? () => {
+                    setConfirmModal(null)
+                    checkAndStart(queue[index + 1].path, index + 1)
+                } : undefined,
+                onStopAll: () => {
+                    setConfirmModal(null)
+                    handleStop()
+                },
                 onCancel: () => {
                     setConfirmModal(null)
+                    setIsRunning(false)
+                    setCurrentQueueIndex(-1)
                 }
             })
         } else {
@@ -1556,7 +1569,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
                             </div>
                             {/* 固定高度容器，彻底解决 ResponsiveContainer 的 0 尺寸报错 */}
                             <div style={{ width: '100%', flex: 1, position: 'relative', minHeight: '180px' }}>
-                                {chartData.length > 0 ? (
+                                {active && chartData.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                                             <defs>
@@ -1698,25 +1711,59 @@ export const Dashboard = forwardRef<any, DashboardProps>(({ lang, active, onRunn
             {/* Confirmation Modal for Overwrite/Resume */}
             {
                 confirmModal && confirmModal.isOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-                        <Card className="w-[400px] max-w-[90vw] shadow-lg border-border bg-background animate-in zoom-in-95 duration-200">
-                            <div className="p-6">
-                                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                                    <AlertTriangle className="w-5 h-5 text-amber-500" />
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <Card className="w-[420px] max-w-[95vw] overflow-hidden border-border bg-background shadow-2xl animate-in zoom-in-95 duration-300 p-8">
+                            <div className="flex items-center gap-4 mb-6">
+                                <AlertTriangle className="w-6 h-6 text-amber-500" />
+                                <h3 className="text-xl font-bold text-foreground">
                                     {t.dashboard.fileExistTitle}
                                 </h3>
-                                <p className="text-sm text-muted-foreground mb-4">
-                                    {t.dashboard.fileExistMsg} <span className="font-mono text-xs bg-muted px-1 rounded">{confirmModal.file}</span>
-                                </p>
-                                <div className="flex flex-col gap-2">
-                                    <Button onClick={confirmModal.onResume} className="w-full justify-center group h-auto py-2.5">
-                                        <span className="font-medium">{t.dashboard.resume}</span>
-                                    </Button>
-                                    <Button onClick={confirmModal.onOverwrite} variant="secondary" className="w-full justify-center h-auto py-2.5 hover:bg-destructive/10 hover:text-destructive">
-                                        <span className="font-medium">{t.dashboard.overwrite}</span>
-                                    </Button>
-                                    <Button onClick={confirmModal.onCancel} variant="ghost" className="w-full">
-                                        {t.dashboard.cancel}
+                            </div>
+
+                            <p className="text-sm text-muted-foreground mb-8">
+                                {t.dashboard.fileExistMsg}
+                                <span className="block mt-2 font-mono text-[11px] bg-secondary/50 text-foreground px-3 py-2 rounded border border-border break-all">
+                                    {confirmModal.file}
+                                </span>
+                            </p>
+
+                            <div className="space-y-3">
+                                <Button
+                                    onClick={confirmModal.onResume}
+                                    className="w-full h-12 bg-indigo-600 hover:bg-indigo-500 dark:bg-primary dark:hover:bg-primary/90 text-white font-bold shadow-lg shadow-indigo-200 dark:shadow-primary/20"
+                                >
+                                    {t.dashboard.resume}
+                                </Button>
+
+                                <div className="flex flex-col gap-3">
+                                    <div className={confirmModal.onSkip ? "grid grid-cols-2 gap-3" : "w-full"}>
+                                        <Button
+                                            onClick={confirmModal.onOverwrite}
+                                            variant="outline"
+                                            className="w-full h-11 border-border bg-background hover:bg-secondary text-foreground font-medium dark:bg-muted/10 dark:border-white/5 dark:hover:bg-muted/30"
+                                        >
+                                            重新翻译
+                                        </Button>
+
+                                        {confirmModal.onSkip && (
+                                            <Button
+                                                onClick={confirmModal.onSkip}
+                                                variant="outline"
+                                                className="w-full h-11 border-border bg-background hover:bg-secondary text-foreground font-medium dark:bg-muted/10 dark:border-white/5 dark:hover:bg-muted/30"
+                                            >
+                                                跳过文件
+                                            </Button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 mt-2 border-t border-border">
+                                    <Button
+                                        onClick={confirmModal.onStopAll}
+                                        variant="ghost"
+                                        className="w-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 text-sm font-medium h-10"
+                                    >
+                                        停止全部翻译任务
                                     </Button>
                                 </div>
                             </div>

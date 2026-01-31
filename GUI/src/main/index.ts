@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, Notification, nativeTheme }
 import { join, basename } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess } from 'child_process'
+import { randomUUID } from 'crypto'
 import fs from 'fs'
 import { ServerManager } from './serverManager'
 
@@ -98,10 +99,31 @@ function cleanupProcesses(): void {
     }
 }
 
+/**
+ * 清理临时文件目录 (启动时调用，防止残留)
+ */
+function cleanupTempDirectory(): void {
+    try {
+        const tempDir = join(app.getPath('userData'), 'temp')
+        if (fs.existsSync(tempDir)) {
+            const files = fs.readdirSync(tempDir)
+            for (const file of files) {
+                try { fs.unlinkSync(join(tempDir, file)) } catch (_) { }
+            }
+            console.log(`[App] Cleaned ${files.length} temp files`)
+        }
+    } catch (e) {
+        console.error('[App] Temp cleanup error:', e)
+    }
+}
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+    // Clean up any residual temp files from crashed sessions
+    cleanupTempDirectory()
+
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.electron')
 
@@ -1460,5 +1482,95 @@ ipcMain.on('stop-translation', () => {
 
 
         console.log('[Stop] Translation process stopped signal sent')
+    }
+})
+
+// --- Term Extraction ---
+ipcMain.handle('extract-terms', async (_event, options: { filePath?: string, text?: string, topK?: number }) => {
+    const middlewarePath = getMiddlewarePath()
+    const pythonPath = getPythonPath()
+    const scriptPath = join(middlewarePath, 'term_extractor.py')
+
+    // Check script exists
+    if (!fs.existsSync(scriptPath)) {
+        return { success: false, error: 'term_extractor.py not found' }
+    }
+
+    try {
+        let inputPath = options.filePath
+        let tempFile: string | null = null
+
+        // If text provided instead of file, write to temp file
+        if (!inputPath && options.text) {
+            const tempDir = join(middlewarePath, 'temp')
+            if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
+            tempFile = join(tempDir, `extract_input_${randomUUID()}.txt`)
+            // Use async write to prevent UI blocking for large files
+            await fs.promises.writeFile(tempFile, options.text, 'utf-8')
+            inputPath = tempFile
+        }
+
+        if (!inputPath) {
+            return { success: false, error: 'No input provided' }
+        }
+
+        const args = [
+            scriptPath,
+            inputPath,
+            '--simple',
+            '-k', String(options.topK || 500)
+        ]
+
+        console.log(`[TermExtract] Running: ${pythonPath} ${args.join(' ')}`)
+
+        return new Promise((resolve) => {
+            const proc = spawnPythonProcess(pythonPath, args, {
+                cwd: middlewarePath,
+                stdio: ['pipe', 'pipe', 'pipe']
+            })
+
+            let stdout = ''
+            let stderr = ''
+
+            proc.stdout?.on('data', (data) => {
+                stdout += data.toString()
+            })
+
+            proc.stderr?.on('data', (data) => {
+                const str = data.toString()
+                stderr += str
+                // Send progress updates to renderer
+                if (str.includes('[PROGRESS]')) {
+                    const match = str.match(/\[PROGRESS\]\s*([\d.]+)%/)
+                    if (match) {
+                        mainWindow?.webContents.send('term-extract-progress', parseFloat(match[1]) / 100)
+                    }
+                }
+            })
+
+            proc.on('close', (code) => {
+                // Cleanup temp file
+                if (tempFile && fs.existsSync(tempFile)) {
+                    try { fs.unlinkSync(tempFile) } catch (_) { }
+                }
+
+                if (code === 0) {
+                    try {
+                        const terms = JSON.parse(stdout)
+                        resolve({ success: true, terms })
+                    } catch (e: any) {
+                        resolve({ success: false, error: `JSON parse error: ${e.message}`, raw: stdout })
+                    }
+                } else {
+                    resolve({ success: false, error: stderr || `Process exited with code ${code}` })
+                }
+            })
+
+            proc.on('error', (err) => {
+                resolve({ success: false, error: err.message })
+            })
+        })
+    } catch (e: any) {
+        return { success: false, error: e.message }
     }
 })

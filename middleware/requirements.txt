@@ -18,3 +18,9 @@ opencc-python-reimplemented>=0.1.7
 
 # Hardware Monitoring
 pynvml>=11.0.0
+
+# Term Extraction (Japanese Tokenizer)
+# fugashi: MeCab wrapper for Japanese morphological analysis
+# unidic-lite: Lightweight dictionary (~248MB, required)
+fugashi>=1.3.0
+unidic-lite>=1.0.8

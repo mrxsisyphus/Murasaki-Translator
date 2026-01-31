@@ -86,10 +86,9 @@ class ResponseParser:
         
         # 4. 按换行切分
         lines = clean_text.split('\n')
-        # 过滤掉可能的尾部空白行 - 仅移除右侧空格以保留首行缩进
+        # 只移除每行右侧的空格，但保留空行本身（对SRT结构很重要）
         lines = [l.rstrip() for l in lines]
-        while lines and not lines[-1]:
-            lines.pop()
+        # 注意：不要移除尾部空行！SRT/ASS 需要它们作为单元分隔符
             
         return lines, cot_content
 
