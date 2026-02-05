@@ -73,7 +73,7 @@ jobs:
 
       - name: Install Node dependencies
         working-directory: GUI
-        run: npm ci
+        run: npm install
 
       - name: Build
         working-directory: GUI
@@ -153,7 +153,7 @@ jobs:
       - name: Install & Build
         working-directory: GUI
         run: |
-          npm ci
+          npm install
           npm run build:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -223,12 +223,15 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install --system -r middleware/requirements.txt
-          uv pip install --system -r middleware/server/requirements.txt
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install -r middleware/requirements.txt
+          pip install -r middleware/server/requirements.txt
 
       - name: Build Python Engine (PyInstaller)
         run: |
-          uv pip install --system pyinstaller
+          source .venv/bin/activate
+          pip install pyinstaller
           cd middleware
           
           # 创建 PyInstaller spec 用于打包
@@ -321,12 +324,14 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install --system -r middleware/requirements.txt
-          uv pip install --system -r middleware/server/requirements.txt
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install -r middleware/requirements.txt
+          pip install -r middleware/server/requirements.txt
 
       - name: Install Node dependencies
         working-directory: GUI
-        run: npm ci
+        run: npm install
 
       - name: Build GUI
         working-directory: GUI
