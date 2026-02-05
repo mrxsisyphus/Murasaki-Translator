@@ -8,7 +8,7 @@
 
 [![Release](https://img.shields.io/github/v/release/soundstarrain/Murasaki-Translator?style=flat-square&color=8a2be2&label=Download)](https://github.com/soundstarrain/Murasaki-Translator/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](./LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows)](https://github.com/soundstarrain/Murasaki-Translator/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-0078D6?style=flat-square)](https://github.com/soundstarrain/Murasaki-Translator/releases)
 [![Model](https://img.shields.io/badge/Model-Murasaki_LLM-FFD21E?style=flat-square&logo=huggingface&logoColor=black)](https://huggingface.co/Murasaki-Project)
 
 <br>
@@ -69,15 +69,31 @@ Murasaki 模型针对术语表进行了特化训练，支持 **Prompt 级术语�
 
 ## 使用说明
 
+### 环境要求
+
+| 平台 | GPU | 说明 |
+|------|-----|------|
+| **Windows** | NVIDIA (CUDA) | 推荐，6GB+ 显存 |
+| **Windows** | AMD/Intel (Vulkan) | 支持 |
+| **macOS** | Apple Silicon (Metal) | M1/M2/M3/M4 统一内存 |
+| **macOS** | Intel | 支持 |
+| **Linux** | NVIDIA/AMD (Vulkan) | AppImage 格式 |
+
 > [!NOTE]
-> 推荐使用 NVIDIA 显卡（6GB+ 显存）以获得最佳体验。
+> 推荐使用独立显卡（6GB+ 显存）以获得最佳体验。Apple Silicon 系列使用统一内存，16GB+ 内存即可流畅运行。
+
+### 快速开始
 
 1. **准备环境**: 
    请直接下载 GitHub 页面右侧的 [Release](https://github.com/soundstarrain/Murasaki-Translator/releases) 版本。
+   - **Windows**: 下载 `*-cuda-x64.zip` (NVIDIA) 或 `*-vulkan-x64.zip` (AMD/Intel)，解压即用
+   - **macOS**: 下载 `*.dmg`，拖入 Applications 文件夹
+   - **Linux**: 下载 `*.AppImage`，添加执行权限后双击运行
+   
    *(如需通过源码编译，请参考 [开发指南](./DEVELOPMENT.md)。)*
    
 > [!IMPORTANT]
-> **⚠️ 关于显卡驱动版本的关键说明**
+> **⚠️ 关于 NVIDIA 显卡驱动版本的关键说明**
 > 若使用 NVIDIA 显卡加速，驱动必须支持 **CUDA 12.4** 或更高版本。
 > - **无需安装 CUDA Toolkit**：普通用户**不需要**下载安装庞大的 CUDA 开发包。
 > - **必须更新驱动**：请确保驱动版本 **≥ 551.61**（即 2024 年初及之后的版本）。
@@ -87,7 +103,9 @@ Murasaki 模型针对术语表进行了特化训练，支持 **Prompt 级术语�
    前往 [Hugging Face](https://huggingface.co/Murasaki-Project) 下载 `Murasaki-GGUF` 模型文件。
 
 3. **启动翻译**: 
-   将下载的模型文件放入项目的 `\resources\middleware\models` 目录中，启动软件并上传需要翻译的文件即可开始工作。
+   将下载的模型文件放入 `models` 目录中，启动软件并上传需要翻译的文件即可开始工作。
+   - Windows: `解压目录\resources\middleware\models`
+   - macOS: `应用程序/Murasaki Translator.app/Contents/Resources/middleware/models`
 
 ### 性能参考
 在 **GeForce RTX 4080 Laptop** 环境下，运行 **4-bit 量化模型**，4个并发任务：
@@ -123,7 +141,8 @@ Murasaki 模型针对术语表进行了特化训练，支持 **Prompt 级术语�
 我们会持续改进 Murasaki Translator 的体验，未来的开发重点有：
 
 - [ ] **多格式文档支持**：计划扩展对多种文件格式的支持，特别是针对 **RPG** 及 **Galgame** 脚本等游戏文本格式的直接解析与翻译。
-- [ ] **Linux Server 后端**：开发轻量级的 Linux 服务端，提供兼容 Llama 标准的 API 接口，支持远程推理。
+- [x] **跨平台支持**：已支持 Windows、macOS (Apple Silicon/Intel)、Linux (AppImage)。
+- [x] **Linux Server 后端**：已提供 Linux CLI 服务端，支持 OpenAI 兼容 API 接口，适用于远程推理部署。
 - [ ] **文档完善**：补充更详尽的**使用教程**与**功能文档**。
 - [ ] **模型迭代**：持续更新模型训练，发布质量更高、针对性更强的新版本模型。
 
