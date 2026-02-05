@@ -4,6 +4,10 @@
   "main": "./out/main/index.js",
   "author": "soundstarrain",
   "description": "Murasaki Local AI Translator",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/soundstarrain/Murasaki-Translator.git"
+  },
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",

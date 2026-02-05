@@ -259,17 +259,19 @@ jobs:
 
       - name: Install Node dependencies
         working-directory: GUI
-        run: npm ci
+        run: npm install
 
       - name: Build for ARM64
         working-directory: GUI
-        run: npm run build -- --mac --arm64
+        run: |
+          npm run build
+          npx electron-builder --mac --arm64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build for x64
         working-directory: GUI
-        run: npm run build -- --mac --x64
+        run: npx electron-builder --mac --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -335,7 +337,9 @@ jobs:
 
       - name: Build GUI
         working-directory: GUI
-        run: npm run build -- --linux --x64
+        run: |
+          npm run build
+          npx electron-builder --linux --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
