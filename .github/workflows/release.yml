@@ -49,6 +49,25 @@ jobs:
             Get-ChildItem $nested.FullName | Move-Item -Destination middleware/bin/win-cuda -Force
             Remove-Item $nested.FullName -Recurse
           }
+          
+          # 下载 NVIDIA cuBLAS 运行时 DLL（cublasLt64_12.dll, cublas64_12.dll）
+          # llama.cpp CUDA 版本需要此 DLL，但官方包不再包含
+          $cublasUrl = "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.4.2.65-archive.zip"
+          Write-Host "Downloading cuBLAS: $cublasUrl"
+          Invoke-WebRequest -Uri $cublasUrl -OutFile cublas.zip
+          Expand-Archive -Path cublas.zip -DestinationPath cublas-temp -Force
+          Copy-Item "cublas-temp/libcublas-windows-x86_64-12.4.2.65-archive/bin/cublasLt64_12.dll" -Destination middleware/bin/win-cuda/ -Force
+          Copy-Item "cublas-temp/libcublas-windows-x86_64-12.4.2.65-archive/bin/cublas64_12.dll" -Destination middleware/bin/win-cuda/ -Force
+          Remove-Item cublas-temp -Recurse -Force
+          
+          # 下载 NVIDIA CUDA 运行时 DLL（cudart64_12.dll）
+          $cudartUrl = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.4.99-archive.zip"
+          Write-Host "Downloading CUDA Runtime: $cudartUrl"
+          Invoke-WebRequest -Uri $cudartUrl -OutFile cudart.zip
+          Expand-Archive -Path cudart.zip -DestinationPath cudart-temp -Force
+          Copy-Item "cudart-temp/cuda_cudart-windows-x86_64-12.4.99-archive/bin/cudart64_12.dll" -Destination middleware/bin/win-cuda/ -Force
+          Remove-Item cudart-temp -Recurse -Force
+          
           Get-ChildItem middleware/bin/win-cuda
 
       - name: Setup Embedded Python
