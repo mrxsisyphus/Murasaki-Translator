@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import threading
+import shutil  # [修复] 用于备份损坏的缓存文件
 from contextlib import nullcontext
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, Future, as_completed
@@ -794,14 +795,15 @@ def main():
     
     # Incremental Translation (增量翻译)
     parser.add_argument("--resume", action="store_true", help="Resume from existing output file (skip translated content)")
-    
+
     # Text Protection (文本保护)
     parser.add_argument("--text-protect", action="store_true", help="Protect variables/tags from translation")
     parser.add_argument("--protect-patterns", help="Path to custom protection patterns file (one regex per line)")
-    
+
     # Cache & Proofreading (缓存与校对)
     parser.add_argument("--save-cache", action="store_true", help="Save translation cache for proofreading")
     parser.add_argument("--cache-path", help="Custom directory to store cache files")
+    parser.add_argument("--force-translation", action="store_true", help="Force re-translation (ignore existing cache)")
     parser.add_argument("--single-block", help="Translate a single block (for proofreading retranslate)")
     parser.add_argument("--json-output", action="store_true", help="Output result as JSON (for single-block mode)")
     parser.add_argument("--rebuild-from-cache", help="Rebuild document from specified cache JSON file")
@@ -1203,6 +1205,31 @@ def main():
         
         # 初始化翻译缓存（用于校对界面）
         translation_cache = TranslationCache(output_path, custom_cache_dir=args.cache_path, source_path=input_path) if args.save_cache else None
+
+        # [修复] 在断点续传或已有缓存时，先加载已有缓存数据
+        # 这样可以保留之前翻译的块，避免校对界面只显示恢复后的部分
+        # 除非使用 --force-translation 强制重新翻译
+        if translation_cache and translation_cache.cache_path and os.path.exists(translation_cache.cache_path):
+            if args.force_translation:
+                print(f"[Cache] Force translation mode: ignoring existing cache and starting fresh")
+            else:
+                try:
+                    if translation_cache.load():
+                        existing_blocks = len(translation_cache.blocks)
+                        print(f"[Cache] Loaded {existing_blocks} blocks from existing cache: {translation_cache.cache_path}")
+                    else:
+                        print(f"[Cache] Failed to load existing cache, will create new one")
+                except Exception as e:
+                    print(f"[Cache] Warning: Failed to load cache: {e}")
+                    # [数据安全] 在清空前备份损坏的缓存文件
+                    try:
+                        backup_path = translation_cache.cache_path + '.bak.corrupt'
+                        shutil.copy2(translation_cache.cache_path, backup_path)
+                        print(f"[Cache] Backed up corrupted cache to: {backup_path}")
+                    except Exception as backup_error:
+                        print(f"[Cache] Warning: Failed to backup corrupted cache: {backup_error}")
+                    # [封装] 使用 clear() 方法，避免直接操作内部结构
+                    translation_cache.clear()
         
         # Load legacy custom protection patterns file if provided via CLI
         if args.protect_patterns and os.path.exists(args.protect_patterns):
@@ -1332,6 +1359,9 @@ def main():
         existing_content = []      # [Audit Fix] Store lines for document reconstruction
         resume_config_matched = False
         
+        # Order-Sensitive Initialization
+        all_results = [None] * len(blocks) # Pre-fill for structural reconstruction
+
         if args.resume:
             existing_lines, existing_content, is_valid = load_existing_output(actual_output_path)
             if existing_lines == -1:
@@ -1379,10 +1409,82 @@ def main():
                          print(f"[Resume] Loaded {len(precalculated_temp)} blocks from temp progress file.")
                 except Exception as e:
                     print(f"[Warning] Failed to load resume data from temp file: {e}")
+            
+            # [Audit Fix] Fill skipped blocks from output file to support EPUB/SRT reconstruction
+            # This MUST happen before Precision Resume Alignment
+            if skip_blocks_from_output > 0:
+                print(f"[Resume] Rebuilding memory state for {skip_blocks_from_output} skipped blocks...")
+                current_line_ptr = 0
+                for idx in range(skip_blocks_from_output):
+                    # 1. Try to find in temp progress file first (contains full metadata/cot)
+                    if idx in precalculated_temp:
+                         all_results[idx] = precalculated_temp[idx]
+                    # 2. Extract from existing output file (requires physical line alignment)
+                    elif existing_content:
+                        block_lines_count = blocks[idx].prompt_text.count('\n') + 1
+                        block_lines = existing_content[current_line_ptr : current_line_ptr + block_lines_count]
+                        
+                        if block_lines:
+                            all_results[idx] = {
+                                "success": True,
+                                "out_text": '\n'.join(block_lines),
+                                "preview_text": '\n'.join(block_lines),
+                                "block_idx": idx,
+                                "is_restorer": True,
+                                "warnings": [],
+                                "src_text": blocks[idx].prompt_text,
+                                "cot_chars": 0,
+                                "usage": {}
+                            }
+                        else:
+                            print(f"[Resume] Warning: Could not find content for block {idx} in existing output.")
+                    
+                    # Advance pointer (account for doc mode spacer if applicable)
+                    block_lines_count = blocks[idx].prompt_text.count('\n') + 1
+                    current_line_ptr += (block_lines_count + 1) if args.mode == "doc" else block_lines_count
+                
+                # [Fix] Synchronize skipped blocks to TranslationCache to prevent data loss on final save
+                if translation_cache:
+                    for idx in range(skip_blocks_from_output):
+                        if all_results[idx] is not None:
+                            res = all_results[idx]
+                            # Extract warning types from result
+                            w_types = [w['type'] if isinstance(w, dict) else w for w in res.get("warnings", [])]
+                            translation_cache.add_block(
+                                idx, 
+                                res.get('src_text', ''), 
+                                res.get('preview_text', res.get('out_text', '')), 
+                                w_types, 
+                                res.get("cot", ""), 
+                                res.get("retry_history", [])
+                            )
+                    logger.info(f"[Cache] Synchronized {skip_blocks_from_output} skipped blocks to memory.")
         
-        # Open output file, and optionally CoT file
-        # 增量模式使用追加写入，否则覆盖写入
-        output_mode = 'a' if (args.resume and skip_blocks_from_output > 0) else 'w'
+        # [Precision Resume] Determine how much content to KEEP from existing file
+        # We rewrite the file instead of plain append ('a') to ensure perfect structural alignment
+        # and eliminate residual/incomplete data from the previous crash.
+        keep_content_str = ""
+        if skip_blocks_from_output > 0 and existing_content:
+            # Reconstruct the exact text that SHOULD be in the file for the skipped blocks
+            # This accounts for mode (doc vs line) and separators
+            rebuilt_parts = []
+            for i in range(skip_blocks_from_output):
+                if all_results[i] and all_results[i].get('success'):
+                    rebuilt_parts.append(all_results[i]['out_text'])
+                else:
+                    # Fallback to source if missing (should not happen with resume integrity)
+                    rebuilt_parts.append(blocks[i].prompt_text)
+            
+            block_separator = "\n\n" if (use_double_newline_separator or args.mode == "doc") else "\n"
+            keep_content_str = block_separator.join(rebuilt_parts) + block_separator
+            
+            # Update counters based on what we are KEEPING
+            total_lines = keep_content_str.count('\n') # Rough approximation
+            total_out_chars = len(keep_content_str)
+            print(f"[Resume] Precision alignment: Keeping {skip_blocks_from_output} blocks ({total_out_chars} chars).")
+
+        # Open output file: Always use 'w' and write kept content to ensure truncation of junk
+        output_mode = 'w'
         
         # Prepare Temp Output File (Append or Create)
         temp_file_mode = 'a' if (args.resume and len(precalculated_temp) > 0 and resume_config_matched) else 'w'
@@ -1397,13 +1499,10 @@ def main():
         with open(actual_output_path, output_mode, encoding='utf-8', buffering=1) as f_out, \
              cot_context as f_cot:
 
-            # If resuming from output file, update counters
-            if skip_blocks_from_output > 0 and output_mode == 'a':
-                # Update initial progress based on existing output (don't write, it's already there)
-                total_lines += len(existing_content)
-                total_out_chars += sum(len(l) for l in existing_content)
-                # We don't have source chars for these, so we'll just use the output lines/chars for progress estimations
-                # The `current` and `percent` will be based on blocks, so this is fine.
+            # Write kept content immediately if resuming
+            if keep_content_str:
+                f_out.write(keep_content_str)
+                f_out.flush()
             
             # ========================================
             # Parallel Worker Function
@@ -1516,15 +1615,12 @@ def main():
             # We maintain a map of future -> index
             future_to_index = {}
             
-            # --- Ordered Buffer for Writing & Reconstruction ---
-            all_results = [None] * len(blocks) # Pre-fill for structural reconstruction
-            
+
             # Determine if we should use strict line count (Retry if line count mismatch)
             _, file_ext = os.path.splitext(input_path)
             # [CRITICAL FIX] Do NOT re-calculate is_structured_doc here! 
             # It was already determined globally (lines ~770) and includes args.alignment_mode.
             # Re-calculating purely on extension would disable alignment mode for .txt.
-            # is_structured_doc = file_ext.lower() in ['.epub', '.srt', '.ass', '.ssa']
             
             # Strict mode logic:
             # - all: Force strict line count for EVERY file
@@ -1541,40 +1637,6 @@ def main():
                 print(f"[Init] Strict Line Count Mode ACTIVE (Policy: {args.strict_mode}). Output MUST match source line count.")
             else:
                 print(f"[Init] Strict Line Count Mode INACTIVE (Policy: {args.strict_mode}).")
-
-            # [Audit Fix] Fill skipped blocks from output file to support EPUB/SRT reconstruction
-            # We must reconstruct the memory state for all skipped blocks so reconstruction works.
-            if skip_blocks_from_output > 0:
-                print(f"[Resume] Rebuilding memory state for {skip_blocks_from_output} skipped blocks...")
-                current_line_ptr = 0
-                for idx in range(skip_blocks_from_output):
-                    # 1. Try to find in temp progress file first (contains full metadata/cot)
-                    if idx in precalculated_temp:
-                         all_results[idx] = precalculated_temp[idx]
-                    # 2. Extract from existing output file (requires physical line alignment)
-                    elif existing_content:
-                        block_lines_count = blocks[idx].prompt_text.count('\n') + 1
-                        block_lines = existing_content[current_line_ptr : current_line_ptr + block_lines_count]
-                        
-                        if block_lines:
-                            all_results[idx] = {
-                                "success": True,
-                                "out_text": '\n'.join(block_lines),
-                                "preview_text": '\n'.join(block_lines),
-                                "block_idx": idx,
-                                "is_restorer": True,
-                                "warnings": [],
-                                "src_text": blocks[idx].prompt_text,
-                                "cot_chars": 0,
-                                "usage": {}
-                            }
-                        else:
-                            print(f"[Resume] Warning: Could not find content for block {idx} in existing output.")
-                    
-                    # Advance pointer (account for doc mode spacer if applicable)
-                    block_lines_count = blocks[idx].prompt_text.count('\n') + 1
-                    current_line_ptr += (block_lines_count + 1) if args.mode == "doc" else block_lines_count
-
 
             print(f"Starting execution with {max_workers} threads...")
             
@@ -1795,15 +1857,36 @@ def main():
         safe_print_json("JSON_FINAL", final_stats)
         
         # 清理临时文件
-        if (completed_count + skip_blocks_from_output) >= len(blocks):
-            try:
-                temp_progress_file.close()
-                if os.path.exists(temp_progress_path): os.remove(temp_progress_path)
-            except: pass
+        try:
+            temp_progress_file.close()
+            if (completed_count + skip_blocks_from_output) >= len(blocks):
+                if os.path.exists(temp_progress_path): 
+                    os.remove(temp_progress_path)
+                    print(f"[Cleanup] Removed temporary progress file: {os.path.basename(temp_progress_path)}")
+        except: pass
 
     except KeyboardInterrupt:
         print("\n[System] Interrupted by user. Shutting down immediately...")
-        
+
+        # [修复] 用户中断时也保存缓存，避免翻译数据丢失
+        # [信号重入保护] 使用嵌套 try 防止第二次 Ctrl+C 中断保存过程
+        if 'translation_cache' in locals() and translation_cache and len(translation_cache.blocks) > 0:
+            try:
+                m_name = os.path.basename(args.model) if args.model else "Unknown"
+                # 忽略第二次 Ctrl+C，确保缓存写入完成
+                try:
+                    if translation_cache.save(model_name=m_name, glossary_path=args.glossary or "", concurrency=args.concurrency):
+                        print(f"[Cache] Saved {len(translation_cache.blocks)} blocks before interrupt")
+                    else:
+                        print("[Cache] Warning: Failed to save cache on interrupt")
+                except KeyboardInterrupt:
+                    # [信号重入保护] 第二次 Ctrl+C，忽略并继续退出
+                    print("[Cache] Ignoring second interrupt during save, exiting...")
+                except Exception as cache_error:
+                    print(f"[Cache] Error saving cache on interrupt: {cache_error}")
+            except Exception as e:
+                print(f"[Cache] Unexpected error during cache save: {e}")
+
         # [中断重建] 从 temp.jsonl 重建预览 txt 供用户查看已翻译内容
         try:
             if 'temp_progress_path' in locals() and os.path.exists(temp_progress_path):
@@ -1829,10 +1912,10 @@ def main():
                         })
         except Exception as e:
             print(f"[System] Failed to rebuild preview: {e}")
-        
+
         if 'executor' in locals():
             executor.shutdown(wait=False, cancel_futures=True)
-        if engine: 
+        if engine:
             engine.stop_server()
     except Exception as e:
         print(f"\n[System] Critical Error: {e}")

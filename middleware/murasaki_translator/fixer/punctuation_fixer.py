@@ -60,10 +60,25 @@ class PunctuationFixer:
         :param dst: 译文
         :param target_is_cjk: 目标语言是否为 CJK
         """
-        # 首尾标点修正
+        if not src or not dst:
+            return dst
+            
+        # 首尾标点修正（引号等）
         dst = cls.fix_start_end(src, dst, target_is_cjk)
         
-        # 应用规则
+        # 强制末尾对齐（。！？）
+        # 如果原文以结束标点结尾，而译文没有，则强制补全
+        if src.strip().endswith(("。", "！", "？", "!", "?", "…")):
+            stripped_dst = dst.rstrip()
+            if stripped_dst and not stripped_dst.endswith(("。", "！", "？", "!", "?", "…", "”", "」", "』")):
+                 # 取原文最后一个标点并转换为对应全角（若是 CJK）
+                 last_punc = src.strip()[-1]
+                 if target_is_cjk:
+                     punc_map = {"!": "！", "?": "？", ".": "。"}
+                     last_punc = punc_map.get(last_punc, last_punc)
+                 dst = stripped_dst + last_punc
+
+        # 应用数量匹配规则
         dst = cls.apply_fix_rules(src, dst, cls.RULE_SAME_COUNT_A)
         dst = cls.apply_fix_rules(src, dst, cls.RULE_SAME_COUNT_B)
         

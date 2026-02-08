@@ -8,7 +8,7 @@
       "name": "Python",
       "status": "ok",
       "version": "3.11.9",
-      "path": "E:\\project\\llmGUI\\middleware\\.venv\\Scripts\\python.exe",
+      "path": "E:\\project\\llmGUI\\python_env\\python.exe",
       "issues": [],
       "fixes": [],
       "canAutoFix": true

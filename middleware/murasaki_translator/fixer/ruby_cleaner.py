@@ -6,7 +6,7 @@ import re
 
 
 class RubyCleaner:
-    # 保守规则（适用于所有文本类型）
+    # 保守规则（适用于所有文本类型，低误伤）
     CONSERVATIVE_RULES = (
         # \\r[漢字,かんじ]
         (re.compile(r"\\r\[(.+?),.+?\]", flags=re.IGNORECASE), r"\1"),
@@ -22,9 +22,13 @@ class RubyCleaner:
         (re.compile(r"<ruby>.*?<rb>(.*?)</rb>.*?</ruby>", flags=re.IGNORECASE), r"\1"),
         # [ruby text=かんじ]
         (re.compile(r"\[ruby text\s*=\s*.*?\]", flags=re.IGNORECASE), ""),
+        # 网文格式：｜漢字《かんじ》
+        (re.compile(r"｜(.+?)《.+?》", flags=re.IGNORECASE), r"\1"),
+        # 网文格式：｜漢字［かんじ］
+        (re.compile(r"｜(.+?)［.+?］", flags=re.IGNORECASE), r"\1"),
     )
 
-    # 激进规则（仅用于通用文本）
+    # 激进规则（可能误伤正常括号或书名号）
     AGGRESSIVE_RULES = (
         # (漢字/かんじ)
         (re.compile(r"\((.+)/.+\)", flags=re.IGNORECASE), r"\1"),
@@ -32,6 +36,8 @@ class RubyCleaner:
         (re.compile(r"\[(.+)/.+\]", flags=re.IGNORECASE), r"\1"),
         # |漢字[かんじ]
         (re.compile(r"\|(.+?)\[.+?\]", flags=re.IGNORECASE), r"\1"),
+        # 孤立书名号注音：漢字《かんじ》
+        (re.compile(r"([^\W_])《.+?》", flags=re.IGNORECASE), r"\1"),
     )
 
     @classmethod

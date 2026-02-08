@@ -27,6 +27,7 @@ def main():
 
         payload = json.loads(input_data)
         text = payload.get('text', '')
+        src_text_overlay = payload.get('source_text') # Try to get real source text from sandbox
         rules = payload.get('rules', [])
         
         protection_rules = [r for r in rules if r.get('pattern') == 'restore_protection']
@@ -47,8 +48,9 @@ def main():
             
             # Create a single-rule processor to capture step-by-step
             p = RuleProcessor([rule])
-            # Note: We don't have real "src_text" in sandbox easily, so pass same text
-            new_text = p.process(current_text, src_text=current_text, protector=protector)
+            # Pass source_text if available, otherwise fallback to current_text (which might be the translated text)
+            # Use src_text_overlay to make Fixers like NumberFixer and PunctuationFixer work in sandbox
+            new_text = p.process(current_text, src_text=src_text_overlay or current_text, protector=protector)
             
             if new_text != current_text:
                 label = rule.get('type', 'rule')

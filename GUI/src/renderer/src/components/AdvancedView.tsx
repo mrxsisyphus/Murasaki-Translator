@@ -42,10 +42,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
   // Flag to prevent auto-switch from overriding saved values during initial load
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const [serverUrl, setServerUrl] = useState("");
-  const [promptPreset, setPromptPreset] = useState("novel");
+   const [serverUrl, setServerUrl] = useState("");
+   const [promptPreset, setPromptPreset] = useState("novel");
 
-  // Device Config
+   // Remote Server Config (修复：添加 state 避免直接读取 localStorage 导致重渲染)
+   const [apiKey, setApiKey] = useState(() => localStorage.getItem("config_api_key") || "");
+
+   // Device Config
   const [deviceMode, setDeviceMode] = useState<"auto" | "cpu">("auto");
   const [gpuDeviceId, setGpuDeviceId] = useState("");
 
@@ -302,12 +305,9 @@ export function AdvancedView({ lang }: { lang: Language }) {
     localStorage.setItem("config_auto_batch_switch", String(autoBatchSwitch));
     localStorage.setItem("config_seed", seed);
 
-    localStorage.setItem("config_server", serverUrl);
-    localStorage.setItem("config_preset", promptPreset);
-    localStorage.setItem(
-      "config_api_key",
-      localStorage.getItem("config_api_key") || "",
-    ); // Preserve API Key
+     localStorage.setItem("config_server", serverUrl);
+     localStorage.setItem("config_preset", promptPreset);
+     localStorage.setItem("config_api_key", apiKey); // Save from state
 
     // Save Device Config
     localStorage.setItem("config_device_mode", deviceMode);
@@ -1458,15 +1458,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                       <label className="text-xs font-medium text-muted-foreground">
                         API Key (可选)
                       </label>
-                      <input
-                        type="password"
-                        className="w-full border p-2 rounded text-sm bg-secondary"
-                        placeholder="sk-..."
-                        value={localStorage.getItem("config_api_key") || ""}
-                        onChange={(e) =>
-                          localStorage.setItem("config_api_key", e.target.value)
-                        }
-                      />
+                       <input
+                         type="password"
+                         className="w-full border p-2 rounded text-sm bg-secondary"
+                         placeholder="sk-..."
+                         value={apiKey}
+                         onChange={(e) => setApiKey(e.target.value)}
+                       />
                     </div>
                   </div>
                   <Button

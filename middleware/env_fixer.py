@@ -213,22 +213,45 @@ class PythonChecker(ComponentChecker):
     
     def check(self) -> None:
         """检查内嵌 Python 环境和依赖完整性"""
-        
+
         # 使用绝对路径定位，避免相对路径在打包后失效
         script_dir = Path(__file__).parent.resolve()
         python_path = None
-        possible_paths = [
-            # 脚本所在目录的 .venv
-            script_dir / '.venv' / ('Scripts/python.exe' if self.platform == 'Windows' else 'bin/python'),
-            # 父目录的 middleware/.venv（开发环境）
-            script_dir.parent / 'middleware' / '.venv' / ('Scripts/python.exe' if self.platform == 'Windows' else 'bin/python'),
-        ]
-        
+
+        # [调试] 打印当前脚本目录，便于排查 Release 环境路径问题
+        print_info(f"脚本目录: {script_dir}")
+
+        # 构建 Python 可执行文件名
+        python_exe = 'python.exe' if self.platform == 'Windows' else 'python'
+        python_subdir = 'Scripts' if self.platform == 'Windows' else 'bin'
+
+        # 多种可能路径，按优先级排序
+        possible_paths = []
+
+        # 1. Release 环境: resources/python_env (优先级最高)
+        # middleware/在 resources/ 下时，python_env/ 是同级目录
+        python_env_path = script_dir / 'python_env' / python_exe
+        possible_paths.append(python_env_path)
+
+        # 2. Release 环境: 脚本在 middleware/ 下，python_env 在 resources/ 下
+        # 此时需要检查父目录（resources）的 python_env
+        resources_python_env = script_dir.parent / 'python_env' / python_exe
+        possible_paths.append(resources_python_env)
+
+        # 3. 开发环境: 脚本所在目录的 .venv
+        dev_venv1 = script_dir / '.venv' / python_subdir / python_exe
+        possible_paths.append(dev_venv1)
+
+        # 4. 开发环境: 父目录的 middleware/.venv
+        dev_venv2 = script_dir.parent / 'middleware' / '.venv' / python_subdir / python_exe
+        possible_paths.append(dev_venv2)
+
+        # 按优先级查找第一个存在的路径
         for path in possible_paths:
             if path.exists():
                 python_path = path
                 break
-        
+
         if not python_path:
             self.status = 'error'
             self.issues.append("内嵌 Python 环境未找到")
@@ -236,10 +259,10 @@ class PythonChecker(ComponentChecker):
             self.can_auto_fix = False
             print_error("未找到内嵌 Python 环境")
             return
-        
+
         self.path = str(python_path)
         print_success(f"找到内嵌 Python: {python_path}")
-        
+
         # 检查 Python 版本
         success, output = run_command([str(python_path), '--version'], timeout=10)
         if not success:
@@ -506,20 +529,36 @@ class LlamaBackendChecker(ComponentChecker):
         """查找 llama-server 可执行文件（复用 platform.ts 逻辑）"""
         middleware_dir = Path(__file__).parent
         binary_name = 'llama-server.exe' if self.platform == 'Windows' else 'llama-server'
-        
-        # 1. 尝试新的 bin/{platform}/ 目录
+
+        # 1. 尝试新的 bin/{platform}/ 目录（Release 环境优先）
         subdir = self._get_subdir()
         new_path = middleware_dir / 'bin' / subdir / binary_name
         if new_path.exists():
             return str(new_path)
-        
-        # 2. 回退：扫描 middleware 目录下的旧结构（llama-*-bin-* 目录）
+
+        # 2. 尝试旧结构：扫描 middleware 目录下的旧目录（llama-*-bin-* 或 llama-*-bin）
         for item in middleware_dir.iterdir():
-            if item.is_dir() and item.name.startswith('llama'):
+            if item.is_dir() and 'llama' in item.name.lower() and 'bin' in item.name.lower():
                 candidate = item / binary_name
                 if candidate.exists():
+                    print_info(f"找到旧结构的 llama-server: {candidate}")
                     return str(candidate)
-        
+
+        # 3. 回退：限制递归深度搜索整个 middleware 目录（兼容性检查，最多3层）
+        # 新标准结构: middleware/bin/{platform}/llama-server.exe (depth=2)
+        # 旧结构: middleware/llama-bin/bin/llama-server.exe (depth=3)
+        # [性能优化] 使用 rglob 而非 glob('**/*')，减少目录遍历开销
+        print_info(f"递归搜索 {binary_name}（最多3层）...")
+        for item in middleware_dir.rglob(binary_name):
+            # 限制深度：检查路径深度，避免扫描深层目录
+            # parts 包含文件名，所以深度限制需要 +1
+            depth = len(item.relative_to(middleware_dir).parts)
+            if depth > 3:  # 允许最多3层目录（如 middleware/llama-bin/bin/llama-server.exe）
+                continue
+            if item.is_file():
+                print_info(f"通过递归搜索找到 llama-server: {item}")
+                return str(item)
+
         return None
     
     def check(self) -> None:
