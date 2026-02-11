@@ -8,6 +8,44 @@ import sys
 import re
 
 
+def _windows_creationflags():
+    return subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+
+
+def _parse_windows_gpu_rows(rows):
+    for row in rows:
+        name = str(row.get('Name', '')).strip()
+        if not name:
+            continue
+        if 'Microsoft' in name or 'Basic' in name:
+            continue
+
+        vram_gb = 0.0
+        adapter_ram = row.get('AdapterRAM')
+        if adapter_ram is not None:
+            try:
+                vram_gb = int(str(adapter_ram).strip()) / (1024**3)
+            except (ValueError, TypeError):
+                vram_gb = 0.0
+
+        backend = "vulkan"
+        upper_name = name.upper()
+        if 'NVIDIA' in upper_name:
+            backend = "cuda"
+        elif 'AMD' in upper_name or 'RADEON' in upper_name:
+            backend = "vulkan"
+        elif 'INTEL' in upper_name:
+            backend = "vulkan"
+
+        return {
+            "name": name,
+            "vram_gb": round(vram_gb, 1),
+            "backend": backend,
+            "is_unified_memory": False
+        }
+    return None
+
+
 def get_gpu_info():
     """
     跨平台获取 GPU 信息
@@ -71,7 +109,7 @@ def _get_macos_gpu_info():
 
 
 def _get_windows_gpu_info():
-    """Windows: 优先 nvidia-smi，回退 wmic"""
+    """Windows: 优先 nvidia-smi，回退 wmic / PowerShell CIM"""
     # 1. 尝试 NVIDIA GPU
     nvidia_info = _get_nvidia_gpu_info()
     if nvidia_info["vram_gb"] > 0:
@@ -84,7 +122,7 @@ def _get_windows_gpu_info():
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            creationflags=_windows_creationflags()
         )
         if result.returncode == 0:
             lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip() and 'Node' not in l]
@@ -116,6 +154,29 @@ def _get_windows_gpu_info():
                         "backend": backend,
                         "is_unified_memory": False
                     }
+    except Exception:
+        pass
+
+    # 3. WMIC 在新版 Windows 可能缺失，回退 PowerShell CIM
+    try:
+        result = subprocess.run(
+            [
+                'powershell',
+                '-NoProfile',
+                '-Command',
+                'Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=_windows_creationflags()
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parsed = json.loads(result.stdout.strip())
+            rows = parsed if isinstance(parsed, list) else [parsed]
+            gpu = _parse_windows_gpu_rows(rows)
+            if gpu:
+                return gpu
     except Exception:
         pass
     
@@ -274,12 +335,28 @@ def _get_system_ram():
                 ['wmic', 'computersystem', 'get', 'totalphysicalmemory'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=_windows_creationflags()
             )
             if result.returncode == 0:
                 lines = result.stdout.strip().split('\n')
                 if len(lines) > 1 and lines[1].strip().isdigit():
                     return int(lines[1].strip()) / (1024**3)
+            result = subprocess.run(
+                [
+                    'powershell',
+                    '-NoProfile',
+                    '-Command',
+                    '(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory'
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=_windows_creationflags()
+            )
+            ram_raw = result.stdout.strip()
+            if result.returncode == 0 and ram_raw.isdigit():
+                return int(ram_raw) / (1024**3)
         elif sys.platform == 'darwin':
             result = subprocess.run(
                 ['sysctl', '-n', 'hw.memsize'],

@@ -116,13 +116,12 @@ export function TermExtractModal({
   // Listen for progress updates
   useEffect(() => {
     // @ts-ignore
-    window.api?.onTermExtractProgress?.((p: number) => {
+    const unsubscribe = window.api?.onTermExtractProgress?.((p: number) => {
       setProgress(p);
     });
 
     return () => {
-      // @ts-ignore
-      window.api?.removeTermExtractProgressListener?.();
+      unsubscribe?.();
     };
   }, []);
 

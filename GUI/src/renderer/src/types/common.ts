@@ -5,22 +5,44 @@ export interface FileConfig {
   ctxSize?: number;
   contextSize?: number; // Compatibility alias
   concurrency?: number;
+  deviceMode?: "auto" | "cpu";
+  gpuDeviceId?: string;
 
   // Translation Params
   temperature?: number;
   lineCheck?: boolean;
+  lineToleranceAbs?: number;
+  lineTolerancePct?: number;
+  strictMode?: string;
   repPenaltyBase?: number;
   repPenaltyMax?: number;
+  repPenaltyStep?: number;
+  maxRetries?: number;
+  retryTempBoost?: number;
+  retryPromptFeedback?: boolean;
 
   // Features
   alignmentMode?: boolean;
   saveCot?: boolean;
   flashAttn?: boolean;
   kvCacheType?: string;
+  useLargeBatch?: boolean;
+  physicalBatchSize?: number;
+  coverageCheck?: boolean;
+  outputHitThreshold?: number;
+  cotCoverageThreshold?: number;
+  coverageRetries?: number;
+  resume?: boolean;
+  daemonMode?: boolean;
+  balanceEnable?: boolean;
+  balanceThreshold?: number;
+  balanceCount?: number;
   seed?: number;
   preset?: string;
 
   // System
+  serverUrl?: string;
+  cacheDir?: string;
   outputDir?: string;
   glossaryPath?: string;
   useGlobalDefaults?: boolean;

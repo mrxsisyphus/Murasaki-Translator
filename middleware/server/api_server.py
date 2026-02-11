@@ -21,6 +21,8 @@ import json
 import uuid
 import asyncio
 import logging
+import secrets
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -56,10 +58,26 @@ app = FastAPI(
     description="Remote translation server with full GUI functionality"
 )
 
+
+def _parse_cors_origins() -> List[str]:
+    """
+    解析 CORS 白名单。
+    - 未设置 MURASAKI_CORS_ORIGINS 时默认 "*"（本地部署友好）
+    - 可通过逗号分隔指定来源进行收敛
+    """
+    origins_raw = os.environ.get("MURASAKI_CORS_ORIGINS", "").strip()
+    if not origins_raw:
+        return ["*"]
+    origins = [origin.strip() for origin in origins_raw.split(",") if origin.strip()]
+    return origins or ["*"]
+
+
+CORS_ALLOWED_ORIGINS = _parse_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=CORS_ALLOWED_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -69,14 +87,46 @@ app.add_middleware(
 # ============================================
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
+
+def _normalize_api_key(api_key: Optional[str]) -> str:
+    if not api_key:
+        return ""
+    return api_key.replace("Bearer ", "").strip()
+
+
+def _is_api_key_valid(api_key: Optional[str]) -> bool:
+    server_key = os.environ.get("MURASAKI_API_KEY")
+    if not server_key:
+        return True
+    normalized = _normalize_api_key(api_key)
+    if not normalized:
+        return False
+    return secrets.compare_digest(normalized, server_key)
+
+
+def _is_ws_auth_required() -> bool:
+    return os.environ.get("MURASAKI_WS_AUTH_REQUIRED", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _is_path_within(path: Path, base: Path) -> bool:
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 async def verify_api_key(api_key: str = Security(api_key_header)):
     """
     验证 API Key
     如果服务器未设置 API Key (MURASAKI_API_KEY)，则开放访问
     如果设置了 API Key，则必须在 Header 中提供正确的 Bearer Token
     """
-    import secrets
-    
     server_key = os.environ.get("MURASAKI_API_KEY")
     
     # 如果没设密码则开放访问
@@ -90,17 +140,13 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
             detail="Missing API Key. Please provide 'Authorization: Bearer <your-key>' header."
         )
     
-    # 支持 "Bearer <key>" 或直接 "<key>" 格式
-    provided_key = api_key.replace("Bearer ", "").strip()
-    
-    # 使用 secrets.compare_digest 防止计时攻击
-    if not secrets.compare_digest(provided_key, server_key):
+    if not _is_api_key_valid(api_key):
         raise HTTPException(
             status_code=403,
             detail="Invalid API Key"
         )
     
-    return provided_key
+    return _normalize_api_key(api_key)
 
 # ============================================
 # Global State
@@ -114,8 +160,42 @@ MAX_COMPLETED_TASKS = 100  # 最多保留 100 个已完成任务
 TASK_RETENTION_HOURS = 24  # 保留 24 小时
 
 # 线程安全锁（防止并发修改字典）
-import threading
 _tasks_lock = threading.Lock()
+TERMINAL_TASK_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+
+def _set_task(task: TranslationTask) -> None:
+    with _tasks_lock:
+        tasks[task.task_id] = task
+
+
+def _get_task(task_id: str) -> Optional[TranslationTask]:
+    with _tasks_lock:
+        return tasks.get(task_id)
+
+
+def _count_running_tasks() -> int:
+    with _tasks_lock:
+        return len([t for t in tasks.values() if t.status == TaskStatus.RUNNING])
+
+
+def _try_transition_task_status(task: TranslationTask, next_status: TaskStatus) -> bool:
+    """
+    统一状态迁移入口：
+    - 终态不可回退（completed/failed/cancelled）
+    - 相同状态幂等
+    """
+    current_status = task.status
+    if current_status == next_status:
+        return True
+    if current_status in TERMINAL_TASK_STATUSES:
+        logger.warning(
+            f"Ignored task status transition for {task.task_id}: "
+            f"{current_status.value} -> {next_status.value}"
+        )
+        return False
+    task.status = next_status
+    return True
 
 def cleanup_old_tasks():
     """清理旧任务，防止内存泄漏和磁盘泄漏"""
@@ -163,7 +243,7 @@ def cleanup_old_tasks():
                     uploads_dir = middleware_dir / "uploads"
                     input_file = Path(task.request.file_path)
                     # 只删除 uploads 目录下的文件
-                    if str(input_file).startswith(str(uploads_dir)):
+                    if _is_path_within(input_file, uploads_dir):
                         if input_file.exists():
                             input_file.unlink()
                             logger.debug(f"Deleted upload file: {input_file}")
@@ -188,7 +268,7 @@ class TranslateRequest(BaseModel):
     # 翻译配置 (与 GUI 参数完全一致)
     model: Optional[str] = None         # 模型路径，None 使用默认
     glossary: Optional[str] = None      # 术语表路径
-    preset: str = "default"             # prompt preset
+    preset: str = "novel"               # prompt preset
     mode: str = "doc"                   # doc | line
     chunk_size: int = 1000
     ctx: int = 8192
@@ -205,7 +285,7 @@ class TranslateRequest(BaseModel):
     # 并行配置
     parallel: int = 1
     flash_attn: bool = False
-    kv_cache_type: str = "q8_0"
+    kv_cache_type: str = "f16"
 
 
 class TranslateResponse(BaseModel):
@@ -261,7 +341,7 @@ async def get_status():
         status="running",
         model_loaded=worker is not None and worker.is_ready(),
         current_model=worker.model_path if worker else None,
-        active_tasks=len([t for t in tasks.values() if t.status == TaskStatus.RUNNING]),
+        active_tasks=_count_running_tasks(),
         uptime_seconds=worker.uptime() if worker else 0
     )
 
@@ -319,7 +399,7 @@ async def create_translation(request: TranslateRequest, background_tasks: Backgr
         status=TaskStatus.PENDING,
         created_at=datetime.now()
     )
-    tasks[task_id] = task
+    _set_task(task)
     
     # 后台执行翻译
     background_tasks.add_task(execute_translation, task)
@@ -334,10 +414,9 @@ async def create_translation(request: TranslateRequest, background_tasks: Backgr
 @app.get("/api/v1/translate/{task_id}", response_model=TaskStatusResponse, dependencies=[Depends(verify_api_key)])
 async def get_task_status(task_id: str):
     """获取任务状态"""
-    if task_id not in tasks:
+    task = _get_task(task_id)
+    if not task:
         raise HTTPException(404, f"Task {task_id} not found")
-    
-    task = tasks[task_id]
     return TaskStatusResponse(
         task_id=task_id,
         status=task.status.value,
@@ -353,12 +432,15 @@ async def get_task_status(task_id: str):
 @app.delete("/api/v1/translate/{task_id}", dependencies=[Depends(verify_api_key)])
 async def cancel_task(task_id: str):
     """取消任务"""
-    if task_id not in tasks:
+    task = _get_task(task_id)
+    if not task:
         raise HTTPException(404, f"Task {task_id} not found")
-    
-    task = tasks[task_id]
-    if task.status == TaskStatus.RUNNING:
+    if task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
         task.cancel_requested = True
+        if task.status == TaskStatus.PENDING:
+            _try_transition_task_status(task, TaskStatus.CANCELLED)
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Cancelled before start")
+            return {"message": "Task cancelled before start"}
         return {"message": "Cancel requested"}
     else:
         return {"message": f"Task is {task.status.value}, cannot cancel"}
@@ -374,25 +456,30 @@ async def upload_file(file: UploadFile = File(...)):
     file_ext = Path(file.filename).suffix
     save_path = upload_dir / f"{file_id}{file_ext}"
     
+    total_size = 0
+    CHUNK_SIZE = 1024 * 1024  # 1MB chunks
     with open(save_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            f.write(chunk)
+            total_size += len(chunk)
     
     return {
         "file_id": file_id,
         "file_path": str(save_path),
         "original_name": file.filename,
-        "size": len(content)
+        "size": total_size
     }
 
 
 @app.get("/api/v1/download/{task_id}", dependencies=[Depends(verify_api_key)])
 async def download_result(task_id: str):
     """下载翻译结果"""
-    if task_id not in tasks:
+    task = _get_task(task_id)
+    if not task:
         raise HTTPException(404, f"Task {task_id} not found")
-    
-    task = tasks[task_id]
     if task.status != TaskStatus.COMPLETED:
         raise HTTPException(400, f"Task is {task.status.value}, not completed")
     
@@ -409,15 +496,21 @@ async def download_result(task_id: str):
 @app.websocket("/api/v1/ws/{task_id}")
 async def websocket_logs(websocket: WebSocket, task_id: str):
     """WebSocket 实时日志推送"""
+    if _is_ws_auth_required() and os.environ.get("MURASAKI_API_KEY"):
+        token = websocket.query_params.get("token")
+        auth_header = websocket.headers.get("Authorization")
+        if not _is_api_key_valid(auth_header or token):
+            await websocket.close(code=1008)
+            return
+
     await websocket.accept()
     websocket_connections.append(websocket)
     
     try:
-        if task_id not in tasks:
+        task = _get_task(task_id)
+        if task is None:
             await websocket.send_json({"error": f"Task {task_id} not found"})
             return
-        
-        task = tasks[task_id]
         last_log_index = 0
         
         while True:
@@ -468,7 +561,14 @@ async def execute_translation(task: TranslationTask):
     global worker
     
     try:
-        task.status = TaskStatus.RUNNING
+        # 若任务在排队期间已被取消，直接结束
+        if task.cancel_requested or task.status == TaskStatus.CANCELLED:
+            _try_transition_task_status(task, TaskStatus.CANCELLED)
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Translation skipped (cancelled).")
+            return
+
+        if not _try_transition_task_status(task, TaskStatus.RUNNING):
+            return
         task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Starting translation...")
         
         # 确保 worker 已初始化
@@ -477,17 +577,25 @@ async def execute_translation(task: TranslationTask):
         
         # 执行翻译
         result = await worker.translate(task)
-        
+
+        # 任务在 worker 内可能已被标记为取消，避免被 completed 覆盖
+        if task.status == TaskStatus.CANCELLED:
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Translation cancelled.")
+            return
+
         task.result = result
-        task.status = TaskStatus.COMPLETED
-        task.progress = 1.0
-        task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Translation completed!")
+        if _try_transition_task_status(task, TaskStatus.COMPLETED):
+            task.progress = 1.0
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Translation completed!")
         
     except Exception as e:
-        task.status = TaskStatus.FAILED
-        task.error = str(e)
-        task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {e}")
-        logger.exception(f"Translation failed for task {task.task_id}")
+        if task.status == TaskStatus.CANCELLED:
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] Translation cancelled.")
+            return
+        if _try_transition_task_status(task, TaskStatus.FAILED):
+            task.error = str(e)
+            task.add_log(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {e}")
+            logger.exception(f"Translation failed for task {task.task_id}")
 
 
 # ============================================
@@ -516,7 +624,6 @@ def main():
         api_key_display = args.api_key
     else:
         # 安全默认值：无 Key 时自动生成 UUID，禁止无鉴权运行
-        import secrets
         generated_key = secrets.token_urlsafe(24)
         os.environ["MURASAKI_API_KEY"] = generated_key
         api_key_display = generated_key

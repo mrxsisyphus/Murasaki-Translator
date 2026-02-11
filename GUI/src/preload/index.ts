@@ -1,132 +1,239 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
+import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
+import { electronAPI } from "@electron-toolkit/preload";
+
+type Unsubscribe = () => void;
+
+const listenerRegistry = new Map<string, Set<(...args: any[]) => void>>();
+
+const addIpcListener = <T>(
+  channel: string,
+  callback: (payload: T) => void,
+): Unsubscribe => {
+  const listener = (_event: IpcRendererEvent, value: T) => callback(value);
+  ipcRenderer.on(channel, listener);
+  if (!listenerRegistry.has(channel)) {
+    listenerRegistry.set(channel, new Set());
+  }
+  listenerRegistry.get(channel)?.add(listener);
+  return () => {
+    ipcRenderer.off(channel, listener);
+    const listeners = listenerRegistry.get(channel);
+    listeners?.delete(listener);
+    if (listeners && listeners.size === 0) {
+      listenerRegistry.delete(channel);
+    }
+  };
+};
+
+const removeRegisteredListeners = (channel: string): void => {
+  const listeners = listenerRegistry.get(channel);
+  if (!listeners) return;
+  for (const listener of listeners) {
+    ipcRenderer.off(channel, listener);
+  }
+  listenerRegistry.delete(channel);
+};
 
 // Custom APIs for renderer
 const api = {
-    selectFile: (options?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => ipcRenderer.invoke('select-file', options),
-    selectFiles: () => ipcRenderer.invoke('select-files'),
-    selectFolderFiles: () => ipcRenderer.invoke('select-folder-files'),
-    selectDirectory: () => ipcRenderer.invoke('select-directory'),
-    selectFolder: () => ipcRenderer.invoke('select-directory'),
-    scanDirectory: (path: string, recursive: boolean = false) => ipcRenderer.invoke('scan-directory', path, recursive),
-    getModels: () => ipcRenderer.invoke('get-models'),
-    getModelsPath: () => ipcRenderer.invoke('get-models-path'),
-    getModelInfo: (modelName: string) => ipcRenderer.invoke('get-model-info', modelName),
-    startTranslation: (inputFile: string, modelPath: string, config: any) => ipcRenderer.send('start-translation', { inputFile, modelPath, config }),
-    getHardwareSpecs: () => ipcRenderer.invoke('get-hardware-specs'),
-    refreshGpuDetection: () => ipcRenderer.invoke('refresh-gpu-detection'),
-    stopTranslation: () => ipcRenderer.send('stop-translation'),
-    getGlossaries: () => ipcRenderer.invoke('get-glossaries'),
-    createGlossaryFile: (arg: string | { filename: string; content?: string }) => ipcRenderer.invoke('create-glossary-file', arg),
-    importGlossary: (sourcePath: string) => ipcRenderer.invoke('import-glossary', sourcePath),
-    checkOutputFileExists: (inputFile: string, config: any) => ipcRenderer.invoke('check-output-file-exists', { inputFile, config }),
-    openGlossaryFolder: () => ipcRenderer.invoke('open-glossary-folder'),
-    readFile: (path: string) => ipcRenderer.invoke('read-file', path),
-    showNotification: (title: string, body: string) => ipcRenderer.send('show-notification', { title, body }),
-    onLogUpdate: (callback: (log: string) => void) => ipcRenderer.on('log-update', (_event, value) => callback(value)),
-    onProcessExit: (callback: (code: number) => void) => ipcRenderer.on('process-exit', (_event, value) => callback(value)),
-    removeLogListener: () => ipcRenderer.removeAllListeners('log-update'),
-    removeProcessExitListener: () => ipcRenderer.removeAllListeners('process-exit'),
+  selectFile: (options?: {
+    title?: string;
+    defaultPath?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }) => ipcRenderer.invoke("select-file", options),
+  selectFiles: () => ipcRenderer.invoke("select-files"),
+  selectFolderFiles: () => ipcRenderer.invoke("select-folder-files"),
+  selectDirectory: (options?: { title?: string; defaultPath?: string }) =>
+    ipcRenderer.invoke("select-directory", options),
+  selectFolder: (options?: { title?: string; defaultPath?: string }) =>
+    ipcRenderer.invoke("select-directory", options),
+  scanDirectory: (path: string, recursive: boolean = false) =>
+    ipcRenderer.invoke("scan-directory", path, recursive),
+  getModels: () => ipcRenderer.invoke("get-models"),
+  getModelsPath: () => ipcRenderer.invoke("get-models-path"),
+  getModelInfo: (modelName: string) =>
+    ipcRenderer.invoke("get-model-info", modelName),
+  startTranslation: (inputFile: string, modelPath: string, config: any) =>
+    ipcRenderer.send("start-translation", { inputFile, modelPath, config }),
+  getHardwareSpecs: () => ipcRenderer.invoke("get-hardware-specs"),
+  refreshGpuDetection: () => ipcRenderer.invoke("refresh-gpu-detection"),
+  stopTranslation: () => ipcRenderer.send("stop-translation"),
+  getGlossaries: () => ipcRenderer.invoke("get-glossaries"),
+  createGlossaryFile: (arg: string | { filename: string; content?: string }) =>
+    ipcRenderer.invoke("create-glossary-file", arg),
+  importGlossary: (sourcePath: string) =>
+    ipcRenderer.invoke("import-glossary", sourcePath),
+  checkOutputFileExists: (inputFile: string, config: any) =>
+    ipcRenderer.invoke("check-output-file-exists", { inputFile, config }),
+  openGlossaryFolder: () => ipcRenderer.invoke("open-glossary-folder"),
+  readFile: (path: string) => ipcRenderer.invoke("read-file", path),
+  showNotification: (title: string, body: string) =>
+    ipcRenderer.send("show-notification", { title, body }),
+  onLogUpdate: (callback: (log: string) => void) =>
+    addIpcListener("log-update", callback),
+  onProcessExit: (callback: (code: number) => void) =>
+    addIpcListener("process-exit", callback),
+  removeLogListener: () => removeRegisteredListeners("log-update"),
+  removeProcessExitListener: () => removeRegisteredListeners("process-exit"),
 
-    // Glossary Management
-    readGlossaryFile: (filename: string) => ipcRenderer.invoke('read-glossary-file', filename),
-    saveGlossaryFile: (data: { filename: string; content: string }) => ipcRenderer.invoke('save-glossary-file', data),
-    deleteGlossaryFile: (filename: string) => ipcRenderer.invoke('delete-glossary-file', filename),
-    renameGlossaryFile: (oldName: string, newName: string) => ipcRenderer.invoke('rename-glossary-file', { oldName, newName }),
-    openPath: (filePath: string) => ipcRenderer.invoke('open-path', filePath),
-    openFolder: (folderPath: string) => ipcRenderer.invoke('open-folder', folderPath),
+  // Glossary Management
+  readGlossaryFile: (filename: string) =>
+    ipcRenderer.invoke("read-glossary-file", filename),
+  saveGlossaryFile: (data: { filename: string; content: string }) =>
+    ipcRenderer.invoke("save-glossary-file", data),
+  deleteGlossaryFile: (filename: string) =>
+    ipcRenderer.invoke("delete-glossary-file", filename),
+  renameGlossaryFile: (oldName: string, newName: string) =>
+    ipcRenderer.invoke("rename-glossary-file", { oldName, newName }),
+  openPath: (filePath: string) => ipcRenderer.invoke("open-path", filePath),
+  openFolder: (folderPath: string) =>
+    ipcRenderer.invoke("open-folder", folderPath),
 
-    // 鏍″鐣岄潰鐩稿叧 API
-    loadCache: (cachePath: string) => ipcRenderer.invoke('load-cache', cachePath),
-    saveCache: (cachePath: string, data: any) => ipcRenderer.invoke('save-cache', cachePath, data),
-    rebuildDoc: (options: { cachePath: string; outputPath?: string }) => ipcRenderer.invoke('rebuild-doc', options),
-    writeFile: (path: string, content: string) => ipcRenderer.invoke('write-file', path, content),
-    saveFile: (options: any) => ipcRenderer.invoke('save-file', options),
-    retranslateBlock: (options: any) => ipcRenderer.invoke('retranslate-block', options),
+  // 校对界面相关 API
+  loadCache: (cachePath: string) => ipcRenderer.invoke("load-cache", cachePath),
+  saveCache: (cachePath: string, data: any) =>
+    ipcRenderer.invoke("save-cache", cachePath, data),
+  rebuildDoc: (options: { cachePath: string; outputPath?: string }) =>
+    ipcRenderer.invoke("rebuild-doc", options),
+  writeFile: (path: string, content: string) =>
+    ipcRenderer.invoke("write-file", path, content),
+  saveFile: (options: any) => ipcRenderer.invoke("save-file", options),
+  retranslateBlock: (options: any) =>
+    ipcRenderer.invoke("retranslate-block", options),
 
-    // Server Manager
-    serverStatus: () => ipcRenderer.invoke('server-status'),
-    serverStart: (config: any) => ipcRenderer.invoke('server-start', config),
-    serverStop: () => ipcRenderer.invoke('server-stop'),
-    serverLogs: () => ipcRenderer.invoke('server-logs'),
-    serverWarmup: () => ipcRenderer.invoke('server-warmup'),
+  // Server Manager
+  serverStatus: () => ipcRenderer.invoke("server-status"),
+  serverStart: (config: any) => ipcRenderer.invoke("server-start", config),
+  serverStop: () => ipcRenderer.invoke("server-stop"),
+  serverLogs: () => ipcRenderer.invoke("server-logs"),
+  serverWarmup: () => ipcRenderer.invoke("server-warmup"),
 
-    // Update System
-    checkUpdate: () => ipcRenderer.invoke('check-update'),
+  // Update System
+  checkUpdate: () => ipcRenderer.invoke("check-update"),
 
-    // System Diagnostics
-    getSystemDiagnostics: () => ipcRenderer.invoke('get-system-diagnostics'),
-    checkEnvComponent: (component: 'Python' | 'CUDA' | 'Vulkan' | 'LlamaBackend' | 'Middleware' | 'Permissions') => ipcRenderer.invoke('check-env-component', component),
-    fixEnvComponent: (component: 'Python' | 'CUDA' | 'Vulkan' | 'LlamaBackend' | 'Middleware' | 'Permissions') => ipcRenderer.invoke('fix-env-component', component),
+  // System Diagnostics
+  getSystemDiagnostics: () => ipcRenderer.invoke("get-system-diagnostics"),
+  checkEnvComponent: (
+    component:
+      | "Python"
+      | "CUDA"
+      | "Vulkan"
+      | "LlamaBackend"
+      | "Middleware"
+      | "Permissions",
+  ) => ipcRenderer.invoke("check-env-component", component),
+  fixEnvComponent: (
+    component:
+      | "Python"
+      | "CUDA"
+      | "Vulkan"
+      | "LlamaBackend"
+      | "Middleware"
+      | "Permissions",
+  ) => ipcRenderer.invoke("fix-env-component", component),
 
-    // Env Fix Progress
-    onEnvFixProgress: (callback: (data: { component: string, stage: string, progress: number, message: string, totalBytes?: number, downloadedBytes?: number }) => void) =>
-        ipcRenderer.on('env-fix-progress', (_event, value) => callback(value)),
-    removeEnvFixProgressListener: () => ipcRenderer.removeAllListeners('env-fix-progress'),
+  // Env Fix Progress
+  onEnvFixProgress: (
+    callback: (data: {
+      component: string;
+      stage: string;
+      progress: number;
+      message: string;
+      totalBytes?: number;
+      downloadedBytes?: number;
+    }) => void,
+  ) => addIpcListener("env-fix-progress", callback),
+  removeEnvFixProgressListener: () =>
+    removeRegisteredListeners("env-fix-progress"),
 
-    // Debug Export
-    readServerLog: () => ipcRenderer.invoke('read-server-log'),
-    getMainProcessLogs: () => ipcRenderer.invoke('get-main-process-logs'),
+  // Debug Export
+  readServerLog: () => ipcRenderer.invoke("read-server-log"),
+  getMainProcessLogs: () => ipcRenderer.invoke("get-main-process-logs"),
 
-    // Theme Sync (for Windows title bar)
-    setTheme: (theme: 'dark' | 'light') => ipcRenderer.send('set-theme', theme),
+  // Theme Sync (for Windows title bar)
+  setTheme: (theme: "dark" | "light") => ipcRenderer.send("set-theme", theme),
 
-    // External Links
-    openExternal: (url: string) => ipcRenderer.send('open-external', url),
+  // External Links
+  openExternal: (url: string) => ipcRenderer.send("open-external", url),
 
-    // Rule System
-    testRules: (text: string, rules: any[]) => ipcRenderer.invoke('test-rules', { text, rules }),
+  // Rule System
+  testRules: (text: string, rules: any[]) =>
+    ipcRenderer.invoke("test-rules", { text, rules }),
 
-    // Retranslate Progress
-    onRetranslateLog: (callback: (data: { index: number, text: string, isError?: boolean }) => void) =>
-        ipcRenderer.on('retranslate-log', (_event, value) => callback(value)),
-    removeRetranslateLogListener: () => ipcRenderer.removeAllListeners('retranslate-log'),
+  // Retranslate Progress
+  onRetranslateLog: (
+    callback: (data: {
+      index: number;
+      text: string;
+      isError?: boolean;
+    }) => void,
+  ) => addIpcListener("retranslate-log", callback),
+  removeRetranslateLogListener: () =>
+    removeRegisteredListeners("retranslate-log"),
 
-    // Term Extraction
-    extractTerms: (options: { filePath?: string, text?: string, topK?: number }) =>
-        ipcRenderer.invoke('extract-terms', options),
-    onTermExtractProgress: (callback: (progress: number) => void) =>
-        ipcRenderer.on('term-extract-progress', (_event, value) => callback(value)),
-    removeTermExtractProgressListener: () => ipcRenderer.removeAllListeners('term-extract-progress'),
+  // Term Extraction
+  extractTerms: (options: {
+    filePath?: string;
+    text?: string;
+    topK?: number;
+  }) => ipcRenderer.invoke("extract-terms", options),
+  onTermExtractProgress: (callback: (progress: number) => void) =>
+    addIpcListener("term-extract-progress", callback),
+  removeTermExtractProgressListener: () =>
+    removeRegisteredListeners("term-extract-progress"),
 
-    // Remote Server
-    remoteConnect: (config: { url: string; apiKey?: string }) => ipcRenderer.invoke('remote-connect', config),
-    remoteDisconnect: () => ipcRenderer.invoke('remote-disconnect'),
-    remoteStatus: () => ipcRenderer.invoke('remote-status'),
-    remoteModels: () => ipcRenderer.invoke('remote-models'),
-    remoteGlossaries: () => ipcRenderer.invoke('remote-glossaries'),
-    remoteTranslate: (options: any) => ipcRenderer.invoke('remote-translate', options),
-    remoteTaskStatus: (taskId: string) => ipcRenderer.invoke('remote-task-status', taskId),
-    remoteCancel: (taskId: string) => ipcRenderer.invoke('remote-cancel', taskId),
-    remoteUpload: (filePath: string) => ipcRenderer.invoke('remote-upload', filePath),
-    remoteDownload: (taskId: string, savePath: string) => ipcRenderer.invoke('remote-download', taskId, savePath),
+  // Remote Server
+  remoteConnect: (config: { url: string; apiKey?: string }) =>
+    ipcRenderer.invoke("remote-connect", config),
+  remoteDisconnect: () => ipcRenderer.invoke("remote-disconnect"),
+  remoteStatus: () => ipcRenderer.invoke("remote-status"),
+  remoteModels: () => ipcRenderer.invoke("remote-models"),
+  remoteGlossaries: () => ipcRenderer.invoke("remote-glossaries"),
+  remoteTranslate: (options: any) =>
+    ipcRenderer.invoke("remote-translate", options),
+  remoteTaskStatus: (taskId: string) =>
+    ipcRenderer.invoke("remote-task-status", taskId),
+  remoteCancel: (taskId: string) => ipcRenderer.invoke("remote-cancel", taskId),
+  remoteUpload: (filePath: string) =>
+    ipcRenderer.invoke("remote-upload", filePath),
+  remoteDownload: (taskId: string, savePath: string) =>
+    ipcRenderer.invoke("remote-download", taskId, savePath),
 
-    // HuggingFace Download
-    hfListRepos: (orgName: string) => ipcRenderer.invoke('hf-list-repos', orgName),
-    hfListFiles: (repoId: string) => ipcRenderer.invoke('hf-list-files', repoId),
-    hfDownloadStart: (repoId: string, fileName: string, mirror: string = 'direct') => ipcRenderer.invoke('hf-download-start', repoId, fileName, mirror),
-    hfDownloadCancel: () => ipcRenderer.invoke('hf-download-cancel'),
-    onHfDownloadProgress: (callback: (data: any) => void) => ipcRenderer.on('hf-download-progress', (_event, value) => callback(value)),
-    offHfDownloadProgress: () => ipcRenderer.removeAllListeners('hf-download-progress'),
-    onHfDownloadError: (callback: (data: any) => void) => ipcRenderer.on('hf-download-error', (_event, value) => callback(value)),
-    offHfDownloadError: () => ipcRenderer.removeAllListeners('hf-download-error'),
-    hfVerifyModel: (orgName: string, filePath: string) => ipcRenderer.invoke('hf-verify-model', orgName, filePath),
-    hfCheckNetwork: () => ipcRenderer.invoke('hf-check-network'),
-}
+  // HuggingFace Download
+  hfListRepos: (orgName: string) =>
+    ipcRenderer.invoke("hf-list-repos", orgName),
+  hfListFiles: (repoId: string) => ipcRenderer.invoke("hf-list-files", repoId),
+  hfDownloadStart: (
+    repoId: string,
+    fileName: string,
+    mirror: string = "direct",
+  ) => ipcRenderer.invoke("hf-download-start", repoId, fileName, mirror),
+  hfDownloadCancel: () => ipcRenderer.invoke("hf-download-cancel"),
+  onHfDownloadProgress: (callback: (data: any) => void) =>
+    addIpcListener("hf-download-progress", callback),
+  offHfDownloadProgress: () =>
+    removeRegisteredListeners("hf-download-progress"),
+  onHfDownloadError: (callback: (data: any) => void) =>
+    addIpcListener("hf-download-error", callback),
+  offHfDownloadError: () => removeRegisteredListeners("hf-download-error"),
+  hfVerifyModel: (orgName: string, filePath: string) =>
+    ipcRenderer.invoke("hf-verify-model", orgName, filePath),
+  hfCheckNetwork: () => ipcRenderer.invoke("hf-check-network"),
+};
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
 if (process.contextIsolated) {
-    try {
-        contextBridge.exposeInMainWorld('electron', electronAPI)
-        contextBridge.exposeInMainWorld('api', api)
-    } catch (error) {
-        console.error(error)
-    }
+  try {
+    contextBridge.exposeInMainWorld("electron", electronAPI);
+    contextBridge.exposeInMainWorld("api", api);
+  } catch (error) {
+    console.error(error);
+  }
 } else {
-    // @ts-ignore (define in dts)
-    window.electron = electronAPI
-    // @ts-ignore (define in dts)
-    window.api = api
+  // @ts-ignore (define in dts)
+  window.electron = electronAPI;
+  // @ts-ignore (define in dts)
+  window.api = api;
 }

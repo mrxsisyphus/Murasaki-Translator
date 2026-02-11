@@ -65,6 +65,7 @@ diff
 middleware/temp_rules_post.json
 middleware/temp_rules_pre.json
 middleware/temp_retry_post.json
+middleware/environment_report.json
 
 sync_python_deps.bat
 setup_dev_python.bat

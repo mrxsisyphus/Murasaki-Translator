@@ -30,20 +30,20 @@ export interface TriggerEvent {
   time: string;
   /** Type of trigger event */
   type:
-  | "empty_retry"
-  | "rep_penalty_increase"
-  | "line_mismatch"
-  | "parse_fallback"
-  | "kana_residue"
-  | "hangeul_residue"
-  | "high_similarity"
-  | "glossary_missed"
-  | "warning_line_mismatch"
-  | "warning_kana_residue"
-  | "warning_hangeul_residue"
-  | "warning_high_similarity"
-  | "warning_glossary_missed"
-  | "warning_quality";
+    | "empty_retry"
+    | "rep_penalty_increase"
+    | "line_mismatch"
+    | "parse_fallback"
+    | "kana_residue"
+    | "hangeul_residue"
+    | "high_similarity"
+    | "glossary_missed"
+    | "warning_line_mismatch"
+    | "warning_kana_residue"
+    | "warning_hangeul_residue"
+    | "warning_high_similarity"
+    | "warning_glossary_missed"
+    | "warning_quality";
   /** Block number where the event occurred (0 if not applicable) */
   block: number;
   /** Human-readable message describing the event */
@@ -85,7 +85,7 @@ export interface TranslationRecord {
   sourceLines?: number;
   /** Source text character count */
   sourceChars?: number;
-  /** Average translation speed (chars/sec) */
+  /** Average translation speed (output chars/sec) */
   avgSpeed?: number;
   /** Configuration used for this translation */
   config: {
@@ -109,7 +109,7 @@ export interface TranslationRecord {
 const MAX_HISTORY_RECORDS = 50;
 
 /** Storage key prefix for record details */
-const DETAIL_KEY_PREFIX = 'history_detail_';
+const DETAIL_KEY_PREFIX = "history_detail_";
 
 /** Record detail containing heavy data - stored separately for lazy loading */
 export interface RecordDetail {
@@ -128,9 +128,12 @@ export const getHistory = (): TranslationRecord[] => {
 
     const records = JSON.parse(data) as TranslationRecord[];
     // Migration: if old format contains logs/triggers in main array, strip them
-    return records.map(r => {
+    return records.map((r) => {
       // Keep basic fields only, remove heavy data if present
-      const { logs, triggers, ...basic } = r as TranslationRecord & { logs?: string[], triggers?: TriggerEvent[] };
+      const { logs, triggers, ...basic } = r as TranslationRecord & {
+        logs?: string[];
+        triggers?: TriggerEvent[];
+      };
       return { ...basic, logs: [], triggers: [] } as TranslationRecord;
     });
   } catch {
@@ -151,10 +154,16 @@ export const getRecordDetail = (id: string): RecordDetail | null => {
     // Fallback: try to get from old format (migration)
     const historyRaw = localStorage.getItem("translation_history");
     if (historyRaw) {
-      const records = JSON.parse(historyRaw) as (TranslationRecord & { logs?: string[], triggers?: TriggerEvent[] })[];
-      const record = records.find(r => r.id === id);
+      const records = JSON.parse(historyRaw) as (TranslationRecord & {
+        logs?: string[];
+        triggers?: TriggerEvent[];
+      })[];
+      const record = records.find((r) => r.id === id);
       if (record && (record.logs?.length || record.triggers?.length)) {
-        const detail = { logs: record.logs || [], triggers: record.triggers || [] };
+        const detail = {
+          logs: record.logs || [],
+          triggers: record.triggers || [],
+        };
         // Migrate to new format
         saveRecordDetail(id, detail);
         return detail;
@@ -173,7 +182,7 @@ const saveRecordDetail = (id: string, detail: RecordDetail) => {
   try {
     localStorage.setItem(`${DETAIL_KEY_PREFIX}${id}`, JSON.stringify(detail));
   } catch (e) {
-    console.error('Failed to save record detail:', e);
+    console.error("Failed to save record detail:", e);
   }
 };
 
@@ -184,8 +193,11 @@ const saveRecordDetail = (id: string, detail: RecordDetail) => {
 export const saveHistory = (records: TranslationRecord[]) => {
   const trimmed = records.slice(-MAX_HISTORY_RECORDS);
   // Strip heavy data from main history storage
-  const lightweight = trimmed.map(r => {
-    const { logs, triggers, ...basic } = r as TranslationRecord & { logs?: string[], triggers?: TriggerEvent[] };
+  const lightweight = trimmed.map((r) => {
+    const { logs, triggers, ...basic } = r as TranslationRecord & {
+      logs?: string[];
+      triggers?: TriggerEvent[];
+    };
     return { ...basic, logs: [], triggers: [] };
   });
   localStorage.setItem("translation_history", JSON.stringify(lightweight));
@@ -199,7 +211,10 @@ export const addRecord = (record: TranslationRecord) => {
   const history = getHistory();
   // Save detail separately
   if (record.logs?.length || record.triggers?.length) {
-    saveRecordDetail(record.id, { logs: record.logs || [], triggers: record.triggers || [] });
+    saveRecordDetail(record.id, {
+      logs: record.logs || [],
+      triggers: record.triggers || [],
+    });
   }
   // Add lightweight record
   history.push({ ...record, logs: [], triggers: [] });
@@ -223,12 +238,21 @@ export const updateRecord = (
       const existingDetail = getRecordDetail(id) || { logs: [], triggers: [] };
       saveRecordDetail(id, {
         logs: updates.logs || existingDetail.logs,
-        triggers: updates.triggers || existingDetail.triggers
+        triggers: updates.triggers || existingDetail.triggers,
       });
     }
     // Update main record without heavy data
-    const { logs, triggers, ...lightUpdates } = updates as Partial<TranslationRecord> & { logs?: string[], triggers?: TriggerEvent[] };
-    history[index] = { ...history[index], ...lightUpdates, logs: [], triggers: [] };
+    const { logs, triggers, ...lightUpdates } =
+      updates as Partial<TranslationRecord> & {
+        logs?: string[];
+        triggers?: TriggerEvent[];
+      };
+    history[index] = {
+      ...history[index],
+      ...lightUpdates,
+      logs: [],
+      triggers: [],
+    };
     saveHistory(history);
   }
 };
@@ -243,7 +267,9 @@ export const deleteRecord = (id: string) => {
   // Also remove detail
   try {
     localStorage.removeItem(`${DETAIL_KEY_PREFIX}${id}`);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 };
 
 /**
@@ -252,10 +278,12 @@ export const deleteRecord = (id: string) => {
 export const clearHistory = () => {
   // Get all record IDs first to clean up details
   const history = getHistory();
-  history.forEach(r => {
+  history.forEach((r) => {
     try {
       localStorage.removeItem(`${DETAIL_KEY_PREFIX}${r.id}`);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
   localStorage.removeItem("translation_history");
 };
@@ -267,7 +295,7 @@ export const clearHistory = () => {
 interface RecordDetailContentProps {
   record: TranslationRecord;
   lang: Language;
-  t: typeof translations["zh"];
+  t: (typeof translations)["zh"];
   isLoading: boolean;
   getRecordDetail: (id: string) => RecordDetail | null;
   getTriggerTypeLabel: (type: TriggerEvent["type"]) => string;
@@ -279,17 +307,25 @@ function RecordDetailContent({
   t,
   isLoading,
   getRecordDetail: getDetail,
-  getTriggerTypeLabel
+  getTriggerTypeLabel,
 }: RecordDetailContentProps) {
   // Get full record with details
   const detail = getDetail(record.id) || { logs: [], triggers: [] };
-  const fullRecord = { ...record, logs: detail.logs, triggers: detail.triggers };
+  const fullRecord = {
+    ...record,
+    logs: detail.logs,
+    triggers: detail.triggers,
+  };
 
   // Trigger events collapse state
   const COLLAPSE_THRESHOLD = 10;
   const shouldCollapse = fullRecord.triggers.length > COLLAPSE_THRESHOLD;
   const [triggersExpanded, setTriggersExpanded] = useState(!shouldCollapse);
-  const displayTriggers = triggersExpanded ? fullRecord.triggers : fullRecord.triggers.slice(0, COLLAPSE_THRESHOLD);
+  const displayTriggers = triggersExpanded
+    ? fullRecord.triggers
+    : fullRecord.triggers.slice(0, COLLAPSE_THRESHOLD);
+  const speedUnit = lang === "en" ? "chars/s" : t.dashboard.charPerSec;
+  const avgSpeedDisplay = Number(fullRecord.avgSpeed || 0).toFixed(1);
 
   if (isLoading) {
     return (
@@ -308,41 +344,64 @@ function RecordDetailContent({
         {/* Stats */}
         <div className="grid grid-cols-7 gap-3 text-sm">
           <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.blocks}</p>
-            <p className="font-medium">{fullRecord.completedBlocks}/{fullRecord.totalBlocks}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.lines}</p>
-            <p className="font-medium">{fullRecord.sourceLines || 0}/{fullRecord.totalLines || 0}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.chars}</p>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.blocks}
+            </p>
             <p className="font-medium">
-              {(fullRecord.sourceChars || 0).toLocaleString()}/{(fullRecord.totalChars || 0).toLocaleString()}
+              {fullRecord.completedBlocks}/{fullRecord.totalBlocks}
             </p>
           </div>
           <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.speed}</p>
-            <p className="font-medium">{fullRecord.avgSpeed || 0}</p>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.lines}
+            </p>
+            <p className="font-medium">
+              {fullRecord.sourceLines || 0}/{fullRecord.totalLines || 0}
+            </p>
           </div>
           <div>
-            <p className="text-muted-foreground text-xs">{lang === "en" ? "Concurrency" : "并发"}</p>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.chars}
+            </p>
+            <p className="font-medium">
+              {(fullRecord.sourceChars || 0).toLocaleString()}/
+              {(fullRecord.totalChars || 0).toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.speed}
+            </p>
+            <p className="font-medium">
+              {avgSpeedDisplay} {speedUnit}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">
+              {lang === "en" ? "Concurrency" : "并发"}
+            </p>
             <p className="font-medium">{fullRecord.config.concurrency || 1}</p>
           </div>
           <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.temperature}</p>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.temperature}
+            </p>
             <p className="font-medium">{fullRecord.config.temperature}</p>
           </div>
           <div>
-            <p className="text-muted-foreground text-xs">{t.historyView.stats.retries}</p>
+            <p className="text-muted-foreground text-xs">
+              {t.historyView.stats.retries}
+            </p>
             <p className="font-medium">
-              {fullRecord.triggers.filter(
-                (tr) =>
-                  tr.type === "empty_retry" ||
-                  tr.type === "line_mismatch" ||
-                  tr.type === "rep_penalty_increase" ||
-                  tr.type === "glossary_missed"
-              ).length}
+              {
+                fullRecord.triggers.filter(
+                  (tr) =>
+                    tr.type === "empty_retry" ||
+                    tr.type === "line_mismatch" ||
+                    tr.type === "rep_penalty_increase" ||
+                    tr.type === "glossary_missed",
+                ).length
+              }
             </p>
           </div>
         </div>
@@ -351,7 +410,9 @@ function RecordDetailContent({
         {fullRecord.modelName && (
           <p className="text-xs text-muted-foreground">
             {t.historyView.labels.model}{" "}
-            <span className="font-medium text-foreground">{fullRecord.modelName}</span>
+            <span className="font-medium text-foreground">
+              {fullRecord.modelName}
+            </span>
           </p>
         )}
 
@@ -367,9 +428,15 @@ function RecordDetailContent({
                   key={i}
                   className="flex items-center gap-2 text-xs bg-secondary/50 rounded px-2 py-1"
                 >
-                  <span className="text-muted-foreground">[Block {tr.block}]</span>
-                  <span className="font-medium">{getTriggerTypeLabel(tr.type)}</span>
-                  <span className="text-muted-foreground truncate">{tr.message}</span>
+                  <span className="text-muted-foreground">
+                    [Block {tr.block}]
+                  </span>
+                  <span className="font-medium">
+                    {getTriggerTypeLabel(tr.type)}
+                  </span>
+                  <span className="text-muted-foreground truncate">
+                    {tr.message}
+                  </span>
                 </div>
               ))}
             </div>
@@ -386,7 +453,9 @@ function RecordDetailContent({
                 ) : (
                   <>
                     <ChevronRight className="w-3 h-3" />
-                    {lang === "en" ? `Show all ${fullRecord.triggers.length} triggers` : `展开全部 ${fullRecord.triggers.length} 条`}
+                    {lang === "en"
+                      ? `Show all ${fullRecord.triggers.length} triggers`
+                      : `展开全部 ${fullRecord.triggers.length} 条`}
                   </>
                 )}
               </button>
@@ -402,7 +471,9 @@ function RecordDetailContent({
             </p>
             <div className="bg-slate-100 dark:bg-slate-900/50 rounded-lg p-3 max-h-80 overflow-y-auto font-mono text-xs text-slate-700 dark:text-slate-300 space-y-0.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 border border-slate-200 dark:border-slate-800">
               {fullRecord.logs.map((log, i) => (
-                <div key={i} className="whitespace-pre-wrap">{log}</div>
+                <div key={i} className="whitespace-pre-wrap">
+                  {log}
+                </div>
               ))}
             </div>
           </div>
@@ -411,36 +482,72 @@ function RecordDetailContent({
         {/* File Paths */}
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="w-16 shrink-0">{t.historyView.labels.sourceFile}</span>
+            <span className="w-16 shrink-0">
+              {t.historyView.labels.sourceFile}
+            </span>
             <span className="truncate flex-1">{fullRecord.filePath}</span>
             <Tooltip content={t.historyView.labels.openFile}>
-              <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => window.api?.openPath?.(fullRecord.filePath)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2"
+                onClick={() => window.api?.openPath?.(fullRecord.filePath)}
+              >
                 <ExternalLink className="w-3 h-3" />
               </Button>
             </Tooltip>
             <Tooltip content={t.historyView.labels.openFolder}>
-              <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => {
-                const folderPath = fullRecord.filePath.substring(0, Math.max(fullRecord.filePath.lastIndexOf("\\"), fullRecord.filePath.lastIndexOf("/")));
-                window.api?.openFolder?.(folderPath);
-              }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2"
+                onClick={() => {
+                  const folderPath = fullRecord.filePath.substring(
+                    0,
+                    Math.max(
+                      fullRecord.filePath.lastIndexOf("\\"),
+                      fullRecord.filePath.lastIndexOf("/"),
+                    ),
+                  );
+                  window.api?.openFolder?.(folderPath);
+                }}
+              >
                 <FolderOpen className="w-3 h-3" />
               </Button>
             </Tooltip>
           </div>
           {fullRecord.outputPath && (
             <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="w-16 shrink-0">{t.historyView.labels.outputFile}</span>
+              <span className="w-16 shrink-0">
+                {t.historyView.labels.outputFile}
+              </span>
               <span className="truncate flex-1">{fullRecord.outputPath}</span>
               <Tooltip content={t.historyView.labels.openFile}>
-                <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => window.api?.openPath?.(fullRecord.outputPath!)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => window.api?.openPath?.(fullRecord.outputPath!)}
+                >
                   <ExternalLink className="w-3 h-3" />
                 </Button>
               </Tooltip>
               <Tooltip content={t.historyView.labels.openFolder}>
-                <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => {
-                  const folderPath = fullRecord.outputPath!.substring(0, Math.max(fullRecord.outputPath!.lastIndexOf("\\"), fullRecord.outputPath!.lastIndexOf("/")));
-                  window.api?.openFolder?.(folderPath);
-                }}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => {
+                    const folderPath = fullRecord.outputPath!.substring(
+                      0,
+                      Math.max(
+                        fullRecord.outputPath!.lastIndexOf("\\"),
+                        fullRecord.outputPath!.lastIndexOf("/"),
+                      ),
+                    );
+                    window.api?.openFolder?.(folderPath);
+                  }}
+                >
                   <FolderOpen className="w-3 h-3" />
                 </Button>
               </Tooltip>
@@ -467,10 +574,10 @@ export function HistoryView({ lang }: { lang: Language }) {
   const [alertOpen, setAlertOpen] = useState(false);
 
   // Lazy loading state for record details
-  const [detailsCache, setDetailsCache] = useState<Record<string, RecordDetail>>({});
+  const [detailsCache, setDetailsCache] = useState<
+    Record<string, RecordDetail>
+  >({});
   const [loadingDetails, setLoadingDetails] = useState<string | null>(null);
-
-
 
   useEffect(() => {
     setRecords(getHistory().reverse()); // Show newest first
@@ -491,14 +598,12 @@ export function HistoryView({ lang }: { lang: Language }) {
       setTimeout(() => {
         const detail = getRecordDetail(id);
         if (detail) {
-          setDetailsCache(prev => ({ ...prev, [id]: detail }));
+          setDetailsCache((prev) => ({ ...prev, [id]: detail }));
         }
         setLoadingDetails(null);
       }, 0);
     }
   };
-
-
 
   const handleDelete = (id: string) => {
     deleteRecord(id);
@@ -520,7 +625,11 @@ export function HistoryView({ lang }: { lang: Language }) {
   const handleExportLog = (record: TranslationRecord) => {
     // Lazy load details for export
     const detail = getRecordDetail(record.id) || { logs: [], triggers: [] };
-    const fullRecord = { ...record, logs: detail.logs, triggers: detail.triggers };
+    const fullRecord = {
+      ...record,
+      logs: detail.logs,
+      triggers: detail.triggers,
+    };
 
     const e = t.historyView.export;
     const lines = [
@@ -545,7 +654,7 @@ export function HistoryView({ lang }: { lang: Language }) {
       `${e.blocks} ${fullRecord.completedBlocks}/${fullRecord.totalBlocks}`,
       `${e.lines} ${fullRecord.totalLines || 0}`,
       `${e.chars} ${fullRecord.totalChars || 0}`,
-      `${e.avgSpeed} ${fullRecord.avgSpeed || 0} ${lang === "en" ? "chars/s" : t.dashboard.charPerSec}`,
+      `${e.avgSpeed} ${Number(fullRecord.avgSpeed || 0).toFixed(1)} ${lang === "en" ? "chars/s" : t.dashboard.charPerSec}`,
       ``,
       e.configTitle,
       `${e.temp} ${fullRecord.config.temperature}`,
@@ -558,7 +667,10 @@ export function HistoryView({ lang }: { lang: Language }) {
 
     if (fullRecord.triggers.length > 0) {
       lines.push(
-        e.triggersTitle.replace("{count}", fullRecord.triggers.length.toString()),
+        e.triggersTitle.replace(
+          "{count}",
+          fullRecord.triggers.length.toString(),
+        ),
       );
       fullRecord.triggers.forEach((tr, i) => {
         lines.push(
@@ -569,7 +681,9 @@ export function HistoryView({ lang }: { lang: Language }) {
     }
 
     if (fullRecord.logs.length > 0) {
-      lines.push(e.logsTitle.replace("{count}", fullRecord.logs.length.toString()));
+      lines.push(
+        e.logsTitle.replace("{count}", fullRecord.logs.length.toString()),
+      );
       lines.push("```");
       fullRecord.logs.forEach((log) => lines.push(log));
       lines.push("```");

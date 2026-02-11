@@ -157,7 +157,8 @@ const texts = {
       repPenaltyBase: "重复惩罚初始值。用于抑制模型输出重复内容。",
       repPenaltyMax: "重复惩罚最大值。检测到死循环时惩罚值会递增至此。",
       seed: "固定随机种子可使输出结果可复现。留空表示随机。",
-      preset: "轻小说模式适合翻译轻小说和连贯性长文本；剧本模式适合 Galgame、动画字幕、漫画；单句模式适合对齐要求高的短句，但效率和效果会下降，不建议使用",
+      preset:
+        "轻小说模式适合翻译轻小说和连贯性长文本；剧本模式适合 Galgame、动画字幕、漫画；单句模式适合对齐要求高的短句，但效率和效果会下降，不建议使用",
     },
   },
   en: {
@@ -244,7 +245,8 @@ const texts = {
       repPenaltyBase: "Initial repetition penalty. Suppresses repeated output.",
       repPenaltyMax: "Max repetition penalty for retry loops.",
       seed: "Fixed seed for reproducible output. Leave empty for random.",
-      preset: "Novel mode for all novels and coherent long texts; Script mode for Galgame, anime subtitles, manga; Short mode for sentences requiring strict alignment, but efficiency and quality will decrease (not recommended)",
+      preset:
+        "Novel mode for all novels and coherent long texts; Script mode for Galgame, anime subtitles, manga; Short mode for sentences requiring strict alignment, but efficiency and quality will decrease (not recommended)",
     },
   },
   jp: {
@@ -328,7 +330,8 @@ const texts = {
       repPenaltyBase: "繰り返しペナルティの初期値。重複出力を抑制。",
       repPenaltyMax: "リトライループの最大ペナルティ値。",
       seed: "再現可能な出力のための固定シード。空の場合はランダム。",
-      preset: "小説モードは全ての小説と長文向け、スクリプトモードはギャルゲー・アニメ字幕・漫画向け、短文モードはアライメント重視の短文向けですが効率と品質が低下するため非推奨",
+      preset:
+        "小説モードは全ての小説と長文向け、スクリプトモードはギャルゲー・アニメ字幕・漫画向け、短文モードはアライメント重視の短文向けですが効率と品質が低下するため非推奨",
     },
   },
 };
@@ -372,7 +375,8 @@ export function FileConfigModal({
 
   useEffect(() => {
     let alive = true;
-    window.api?.getModels?.()
+    window.api
+      ?.getModels?.()
       .then((models) => {
         if (!alive || !Array.isArray(models)) return;
         setAvailableModels(models);
@@ -476,8 +480,8 @@ export function FileConfigModal({
             placeholder={
               config.useGlobalDefaults
                 ? globalValue ||
-                placeholder ||
-                (lang === "zh" ? "未设置" : "Not set")
+                  placeholder ||
+                  (lang === "zh" ? "未设置" : "Not set")
                 : placeholder || t.notSet
             }
             disabled={config.useGlobalDefaults}
@@ -486,10 +490,11 @@ export function FileConfigModal({
             step={step}
             className={`
                             flex-1 h-8 px-2.5 text-sm rounded-md border transition-all outline-none
-                            ${config.useGlobalDefaults
-                ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed placeholder:text-muted-foreground/40"
-                : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-              }
+                            ${
+                              config.useGlobalDefaults
+                                ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed placeholder:text-muted-foreground/40"
+                                : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                            }
                         `}
           />
           {onBrowse && (
@@ -585,7 +590,12 @@ export function FileConfigModal({
               >
                 <Settings className="w-3.5 h-3.5 shrink-0 opacity-70" />
                 {t.preset}
-                <UITooltip content={t.help?.preset || "选择翻译模式：轻小说适合长文本，剧本适合对话，单句适合零散内容"}>
+                <UITooltip
+                  content={
+                    t.help?.preset ||
+                    "选择翻译模式：轻小说适合长文本，剧本适合对话，单句适合零散内容"
+                  }
+                >
                   <Info className="w-3 h-3 text-muted-foreground/50 hover:text-primary cursor-help" />
                 </UITooltip>
               </label>
@@ -595,9 +605,7 @@ export function FileConfigModal({
             </div>
             <select
               value={
-                !config.useGlobalDefaults && config.preset
-                  ? config.preset
-                  : ""
+                !config.useGlobalDefaults && config.preset ? config.preset : ""
               }
               disabled={config.useGlobalDefaults}
               onChange={(e) =>
@@ -608,9 +616,10 @@ export function FileConfigModal({
               }
               className={`
                 w-full h-8 px-2.5 text-sm rounded-md border transition-all outline-none
-                ${config.useGlobalDefaults
-                  ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
-                  : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                ${
+                  config.useGlobalDefaults
+                    ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
+                    : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                 }
               `}
             >
@@ -637,11 +646,14 @@ export function FileConfigModal({
                       : "Model Override"}
                 </label>
                 <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                  {t.currentGlobal}: {globalModel ? globalModel.split(/[/\\]/).pop() : t.notSet}
+                  {t.currentGlobal}:{" "}
+                  {globalModel ? globalModel.split(/[/\\]/).pop() : t.notSet}
                 </span>
               </div>
               <select
-                value={!config.useGlobalDefaults && config.model ? config.model : ""}
+                value={
+                  !config.useGlobalDefaults && config.model ? config.model : ""
+                }
                 disabled={config.useGlobalDefaults}
                 onChange={(e) =>
                   setConfig((prev) => ({
@@ -651,16 +663,23 @@ export function FileConfigModal({
                 }
                 className={`
                   w-full h-8 px-2.5 text-sm rounded-md border transition-all outline-none
-                  ${config.useGlobalDefaults
-                    ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
-                    : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                  ${
+                    config.useGlobalDefaults
+                      ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
+                      : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                   }
                 `}
               >
                 <option value="">
                   {config.useGlobalDefaults
-                    ? (globalModel ? globalModel.split(/[/\\]/).pop() : t.notSet)
-                    : (lang === "zh" ? "跟随全局" : lang === "jp" ? "グローバルに従う" : "Use Global")}
+                    ? globalModel
+                      ? globalModel.split(/[/\\]/).pop()
+                      : t.notSet
+                    : lang === "zh"
+                      ? "跟随全局"
+                      : lang === "jp"
+                        ? "グローバルに従う"
+                        : "Use Global"}
                 </option>
                 {availableModels.map((model) => (
                   <option key={model} value={model}>
@@ -711,7 +730,6 @@ export function FileConfigModal({
               />
             </div>
           </div>
-
 
           {/* Core Params Section */}
           <div className="space-y-4">
@@ -851,10 +869,11 @@ export function FileConfigModal({
                   }
                   className={`
                                         w-full h-8 px-2.5 text-sm rounded-md border transition-all outline-none
-                                        ${config.useGlobalDefaults
-                      ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
-                      : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                    }
+                                        ${
+                                          config.useGlobalDefaults
+                                            ? "bg-secondary/30 border-transparent text-muted-foreground/50 cursor-not-allowed"
+                                            : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                                        }
                                     `}
                 >
                   <option
@@ -974,10 +993,11 @@ export function FileConfigModal({
             <div
               className={`
                             flex items-center justify-between p-3 rounded-lg border transition-colors
-                            ${config.useGlobalDefaults
-                  ? "bg-secondary/20 border-transparent opacity-60"
-                  : "bg-background/30 border-border"
-                }
+                            ${
+                              config.useGlobalDefaults
+                                ? "bg-secondary/20 border-transparent opacity-60"
+                                : "bg-background/30 border-border"
+                            }
                         `}
             >
               <div className="flex items-center gap-2">
@@ -997,10 +1017,11 @@ export function FileConfigModal({
                 <select
                   className={`
                                         h-8 text-sm rounded-md border outline-none
-                                        ${config.useGlobalDefaults
-                      ? "bg-transparent border-transparent text-muted-foreground cursor-not-allowed"
-                      : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20"
-                    }
+                                        ${
+                                          config.useGlobalDefaults
+                                            ? "bg-transparent border-transparent text-muted-foreground cursor-not-allowed"
+                                            : "bg-background/50 border-border focus:ring-2 focus:ring-primary/20"
+                                        }
                                     `}
                   value={
                     config.useGlobalDefaults
@@ -1463,14 +1484,17 @@ export function LibraryView({
         const historyStr = localStorage.getItem("translation_history");
         if (historyStr) {
           const history = JSON.parse(historyStr);
-          // Normalize item path for comparison
-          const normItemPath = item.path.toLowerCase().replace(/[/\\]/g, "\\");
+          const normalizeComparePath = (rawPath: string) => {
+            const unified = rawPath.replace(/[/\\]/g, "\\");
+            const isWindows = navigator.platform.toLowerCase().includes("win");
+            return isWindows ? unified.toLowerCase() : unified;
+          };
+          // Normalize item path for comparison (case-insensitive on Windows only)
+          const normItemPath = normalizeComparePath(item.path);
 
           // Find most recent matching record
           const match = history.find((h: any) => {
-            const hPath = (h.filePath || h.inputPath || "")
-              .toLowerCase()
-              .replace(/[/\\]/g, "\\");
+            const hPath = normalizeComparePath(h.filePath || h.inputPath || "");
             return hPath === normItemPath;
           });
 
@@ -1753,10 +1777,11 @@ export function LibraryView({
                     key={item.id}
                     className={`
                                             flex items-center gap-3 px-4 py-3 transition-all group
-                                            ${selectedItems.has(item.id)
-                        ? "bg-primary/5"
-                        : "hover:bg-secondary/30"
-                      }
+                                            ${
+                                              selectedItems.has(item.id)
+                                                ? "bg-primary/5"
+                                                : "hover:bg-secondary/30"
+                                            }
                                         `}
                     onDragOver={(e) => {
                       e.preventDefault();

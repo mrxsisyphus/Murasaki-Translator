@@ -42,12 +42,14 @@ export function AdvancedView({ lang }: { lang: Language }) {
   // Flag to prevent auto-switch from overriding saved values during initial load
   const [isLoaded, setIsLoaded] = useState(false);
 
-   const [serverUrl, setServerUrl] = useState("");
+  const [serverUrl, setServerUrl] = useState("");
 
-   // Remote Server Config (修复：添加 state 避免直接读取 localStorage 导致重渲染)
-   const [apiKey, setApiKey] = useState(() => localStorage.getItem("config_api_key") || "");
+  // Remote Server Config (修复：添加 state 避免直接读取 localStorage 导致重渲染)
+  const [apiKey, setApiKey] = useState(
+    () => localStorage.getItem("config_api_key") || "",
+  );
 
-   // Device Config
+  // Device Config
   const [deviceMode, setDeviceMode] = useState<"auto" | "cpu">("auto");
   const [gpuDeviceId, setGpuDeviceId] = useState("");
 
@@ -105,6 +107,7 @@ export function AdvancedView({ lang }: { lang: Language }) {
   const [serverStatus, setServerStatus] = useState<any>(null);
   const [isStartingServer, setIsStartingServer] = useState(false);
   const [isWarming, setIsWarming] = useState(false);
+  const [isTestingRemote, setIsTestingRemote] = useState(false);
   const [warmupTime, setWarmupTime] = useState<number | null>(null);
 
   useEffect(() => {
@@ -303,8 +306,8 @@ export function AdvancedView({ lang }: { lang: Language }) {
     localStorage.setItem("config_auto_batch_switch", String(autoBatchSwitch));
     localStorage.setItem("config_seed", seed);
 
-     localStorage.setItem("config_server", serverUrl);
-     localStorage.setItem("config_api_key", apiKey); // Save from state
+    localStorage.setItem("config_server", serverUrl);
+    localStorage.setItem("config_api_key", apiKey); // Save from state
 
     // Save Device Config
     localStorage.setItem("config_device_mode", deviceMode);
@@ -624,12 +627,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                   <div className="flex items-center justify-between mt-4 mb-2">
                     <div className="flex flex-col">
                       <span
-                        className={`text-3xl font-bold font-mono tracking-tight transition-colors duration-500 ${parseInt(ctxSize) * concurrency > 32768
-                          ? "text-red-500"
-                          : parseInt(ctxSize) * concurrency > 16384
-                            ? "text-amber-500"
-                            : "text-emerald-500"
-                          }`}
+                        className={`text-3xl font-bold font-mono tracking-tight transition-colors duration-500 ${
+                          parseInt(ctxSize) * concurrency > 32768
+                            ? "text-red-500"
+                            : parseInt(ctxSize) * concurrency > 16384
+                              ? "text-amber-500"
+                              : "text-emerald-500"
+                        }`}
                       >
                         {ctxSize}
                       </span>
@@ -1044,12 +1048,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {/* Card 1: Token Throughput Stats */}
                         <div
-                          className={`relative overflow-hidden rounded-xl border p-3 flex flex-col justify-between h-full transition-all duration-300 ${parseInt(ctxSize) * concurrency > 32768
-                            ? "bg-red-500/5 border-red-500/20"
-                            : parseInt(ctxSize) * concurrency > 16384
-                              ? "bg-amber-500/5 border-amber-500/20"
-                              : "bg-secondary/30 border-border/40 hover:border-primary/30"
-                            }`}
+                          className={`relative overflow-hidden rounded-xl border p-3 flex flex-col justify-between h-full transition-all duration-300 ${
+                            parseInt(ctxSize) * concurrency > 32768
+                              ? "bg-red-500/5 border-red-500/20"
+                              : parseInt(ctxSize) * concurrency > 16384
+                                ? "bg-amber-500/5 border-amber-500/20"
+                                : "bg-secondary/30 border-border/40 hover:border-primary/30"
+                          }`}
                         >
                           <div className="flex flex-col">
                             <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
@@ -1057,12 +1062,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                             </span>
                             <div className="flex items-baseline gap-1.5 mt-1">
                               <span
-                                className={`text-xl font-mono font-bold tracking-tight ${parseInt(ctxSize) * concurrency > 32768
-                                  ? "text-red-600"
-                                  : parseInt(ctxSize) * concurrency > 16384
-                                    ? "text-amber-600"
-                                    : "text-primary"
-                                  }`}
+                                className={`text-xl font-mono font-bold tracking-tight ${
+                                  parseInt(ctxSize) * concurrency > 32768
+                                    ? "text-red-600"
+                                    : parseInt(ctxSize) * concurrency > 16384
+                                      ? "text-amber-600"
+                                      : "text-primary"
+                                }`}
                               >
                                 {(
                                   parseInt(ctxSize) * concurrency
@@ -1075,12 +1081,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                           </div>
                           <div className="w-full h-1 mt-3 bg-foreground/5 rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all duration-500 ${parseInt(ctxSize) * concurrency > 32768
-                                ? "bg-red-500 w-full animate-pulse"
-                                : parseInt(ctxSize) * concurrency > 16384
-                                  ? "bg-amber-500"
-                                  : "bg-emerald-500"
-                                }`}
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                parseInt(ctxSize) * concurrency > 32768
+                                  ? "bg-red-500 w-full animate-pulse"
+                                  : parseInt(ctxSize) * concurrency > 16384
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                              }`}
                               style={{
                                 width: `${Math.min(100, ((parseInt(ctxSize) * concurrency) / 32768) * 100)}%`,
                               }}
@@ -1132,12 +1139,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
 
                             return (
                               <div
-                                className={`relative overflow-hidden rounded-xl border p-3 flex flex-col justify-between h-full transition-all duration-300 ${!isSafe
-                                  ? "bg-red-500/5 border-red-500/20"
-                                  : usagePct > 90
-                                    ? "bg-amber-500/5 border-amber-500/20"
-                                    : "bg-secondary/30 border-border/40 hover:border-blue-500/30"
-                                  }`}
+                                className={`relative overflow-hidden rounded-xl border p-3 flex flex-col justify-between h-full transition-all duration-300 ${
+                                  !isSafe
+                                    ? "bg-red-500/5 border-red-500/20"
+                                    : usagePct > 90
+                                      ? "bg-amber-500/5 border-amber-500/20"
+                                      : "bg-secondary/30 border-border/40 hover:border-blue-500/30"
+                                }`}
                               >
                                 <div className="flex flex-col">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
@@ -1191,67 +1199,67 @@ export function AdvancedView({ lang }: { lang: Language }) {
                       {/* --- Consolidated System Advisory --- */}
                       {(concurrency > 1 ||
                         parseInt(ctxSize) * concurrency > 16384) && (
-                          <div
-                            className={`rounded-xl border p-3 flex gap-3 items-start backdrop-blur-sm ${parseInt(ctxSize) * concurrency > 32768
+                        <div
+                          className={`rounded-xl border p-3 flex gap-3 items-start backdrop-blur-sm ${
+                            parseInt(ctxSize) * concurrency > 32768
                               ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
                               : concurrency > 8
                                 ? "bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-400"
                                 : "bg-secondary/40 border-border/50 text-foreground/80"
-                              }`}
-                          >
-                            <Info className="w-4 h-4 shrink-0 mt-0.5 opacity-80" />
-                            <div className="space-y-1.5 flex-1">
-                              <span className="text-[11px] font-bold uppercase tracking-wider opacity-90">
-                                系统细节与建议 (System Advisory)
-                              </span>
-                              <ul className="text-[10px] space-y-1 leading-relaxed opacity-80 list-disc pl-3">
-                                {/* 32k Limit Warning */}
-                                {parseInt(ctxSize) * concurrency > 32768 && (
-                                  <li className="font-bold">
-                                    总吞吐量已突破 32k
-                                    架构上限，超出部分将被截断，请务必降低 Context
-                                    或并发。
+                          }`}
+                        >
+                          <Info className="w-4 h-4 shrink-0 mt-0.5 opacity-80" />
+                          <div className="space-y-1.5 flex-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider opacity-90">
+                              系统细节与建议 (System Advisory)
+                            </span>
+                            <ul className="text-[10px] space-y-1 leading-relaxed opacity-80 list-disc pl-3">
+                              {/* 32k Limit Warning */}
+                              {parseInt(ctxSize) * concurrency > 32768 && (
+                                <li className="font-bold">
+                                  总吞吐量已突破 32k
+                                  架构上限，超出部分将被截断，请务必降低 Context
+                                  或并发。
+                                </li>
+                              )}
+                              {/* High Concurrency Warning */}
+                              {concurrency > 8 &&
+                                parseInt(ctxSize) * concurrency <= 32768 && (
+                                  <li>
+                                    并发数过高 ({concurrency})
+                                    可能导致系统不稳定或显存带宽瓶颈以及翻译质量下降，建议仅在高端显卡
+                                    (24G+) 上使用
                                   </li>
                                 )}
-                                {/* High Concurrency Warning */}
-                                {concurrency > 8 &&
-                                  parseInt(ctxSize) * concurrency <= 32768 && (
-                                    <li>
-                                      并发数过高 ({concurrency})
-                                      可能导致系统不稳定或显存带宽瓶颈以及翻译质量下降，建议仅在高端显卡
-                                      (24G+) 上使用
-                                    </li>
-                                  )}
-                                {/* 16k Advisory */}
-                                {parseInt(ctxSize) * concurrency > 16384 &&
-                                  parseInt(ctxSize) * concurrency <= 32768 && (
-                                    <li>
-                                      总负载处于高位
-                                      (&gt;16k)，为保证最佳推理稳定性，建议适当控制负载。
-                                    </li>
-                                  )}
-                                {/* Quality Note - Standard (x2-x4) */}
-                                {concurrency > 1 && concurrency <= 4 && (
-                                  <li className="text-primary font-medium italic">
-                                    并发模式已开启 (x{concurrency}
-                                    )。相比单线程模式，吞吐量将大幅提升，但翻译质量会稍微下降。对翻译质量要求高的文本建议保持单线程模式
+                              {/* 16k Advisory */}
+                              {parseInt(ctxSize) * concurrency > 16384 &&
+                                parseInt(ctxSize) * concurrency <= 32768 && (
+                                  <li>
+                                    总负载处于高位
+                                    (&gt;16k)，为保证最佳推理稳定性，建议适当控制负载。
                                   </li>
                                 )}
-                                {/* Quality Note - High (x5+) */}
-                                {concurrency > 4 && (
-                                  <li className="text-orange-600 dark:text-orange-400 font-bold italic">
-                                    高并发模式 (x{concurrency}
-                                    )：可能影响系统稳定性，翻译质量将面临下降风险。除非显存足够大，否则不建议使用
-                                  </li>
-                                )}
-                              </ul>
-                            </div>
+                              {/* Quality Note - Standard (x2-x4) */}
+                              {concurrency > 1 && concurrency <= 4 && (
+                                <li className="text-primary font-medium italic">
+                                  并发模式已开启 (x{concurrency}
+                                  )。相比单线程模式，吞吐量将大幅提升，但翻译质量会稍微下降。对翻译质量要求高的文本建议保持单线程模式
+                                </li>
+                              )}
+                              {/* Quality Note - High (x5+) */}
+                              {concurrency > 4 && (
+                                <li className="text-orange-600 dark:text-orange-400 font-bold italic">
+                                  高并发模式 (x{concurrency}
+                                  )：可能影响系统稳定性，翻译质量将面临下降风险。除非显存足够大，否则不建议使用
+                                </li>
+                              )}
+                            </ul>
                           </div>
-                        )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-
               </CardContent>
             </Card>
 
@@ -1273,19 +1281,21 @@ export function AdvancedView({ lang }: { lang: Language }) {
                     <div className="flex bg-secondary rounded-lg p-0.5 border">
                       <button
                         onClick={() => toggleDaemonMode(false)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${!daemonMode
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                          }`}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                          !daemonMode
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
                       >
                         自动模式
                       </button>
                       <button
                         onClick={() => toggleDaemonMode(true)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${daemonMode
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                          }`}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                          daemonMode
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
                       >
                         常驻模式
                       </button>
@@ -1320,7 +1330,10 @@ export function AdvancedView({ lang }: { lang: Language }) {
                             value={localPort}
                             onChange={(e) => {
                               setLocalPort(e.target.value);
-                              localStorage.setItem("config_local_port", e.target.value);
+                              localStorage.setItem(
+                                "config_local_port",
+                                e.target.value,
+                              );
                             }}
                           />
                         </div>
@@ -1333,7 +1346,10 @@ export function AdvancedView({ lang }: { lang: Language }) {
                             value={localHost}
                             onChange={(e) => {
                               setLocalHost(e.target.value);
-                              localStorage.setItem("config_local_host", e.target.value);
+                              localStorage.setItem(
+                                "config_local_host",
+                                e.target.value,
+                              );
                             }}
                           >
                             <option value="127.0.0.1">
@@ -1358,7 +1374,8 @@ export function AdvancedView({ lang }: { lang: Language }) {
                             </span>
                             {serverStatus?.running && (
                               <span className="text-[10px] bg-secondary px-1 rounded border font-mono text-muted-foreground">
-                                监听端口:{serverStatus.port} (PID: {serverStatus.pid})
+                                监听端口:{serverStatus.port} (PID:{" "}
+                                {serverStatus.pid})
                               </span>
                             )}
                           </div>
@@ -1434,33 +1451,40 @@ export function AdvancedView({ lang }: { lang: Language }) {
                       <label className="text-xs font-medium text-muted-foreground">
                         API Key (可选)
                       </label>
-                       <input
-                         type="password"
-                         className="w-full border p-2 rounded text-sm bg-secondary"
-                         placeholder="sk-..."
-                         value={apiKey}
-                         onChange={(e) => setApiKey(e.target.value)}
-                       />
+                      <input
+                        type="password"
+                        className="w-full border p-2 rounded text-sm bg-secondary"
+                        placeholder="sk-..."
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                      />
                     </div>
                   </div>
                   <Button
                     variant="outline"
                     size="sm"
                     className="text-xs"
+                    disabled={isTestingRemote}
                     onClick={async () => {
+                      setIsTestingRemote(true);
                       try {
                         const url = serverUrl || "http://127.0.0.1:8080";
-                        const res = await fetch(`${url}/health`);
-                        if (res.ok)
+                        const result = await (window as any).api?.remoteConnect({
+                          url,
+                          apiKey: apiKey.trim() || undefined,
+                        });
+                        if (result?.ok)
                           showAlert({
                             title: "连接成功",
-                            description: "✓ 已成功建立与后端的连接",
+                            description: `✓ 已成功建立与后端的连接${result.version ? ` (v${result.version})` : ""}`,
                             variant: "success",
                           });
                         else
                           showAlert({
                             title: "连接失败",
-                            description: "✗ 服务器返回错误: " + res.status,
+                            description:
+                              "✗ 无法建立连接: " +
+                              (result?.message || "请检查服务地址/API Key"),
                             variant: "destructive",
                           });
                       } catch (e) {
@@ -1469,10 +1493,13 @@ export function AdvancedView({ lang }: { lang: Language }) {
                           description: "✗ 无法连接至服务器: " + e,
                           variant: "destructive",
                         });
+                      } finally {
+                        setIsTestingRemote(false);
+                        await (window as any).api?.remoteDisconnect?.();
                       }
                     }}
                   >
-                    测试连接
+                    {isTestingRemote ? "测试中..." : "测试连接"}
                   </Button>
                 </div>
               </CardContent>
@@ -1661,10 +1688,11 @@ export function AdvancedView({ lang }: { lang: Language }) {
                           onClick={() => setKvCacheType(opt.id)}
                           disabled={autoKvSwitch}
                           className={`flex flex-col items-start p-2 rounded-lg border transition-all text-left
-                                                        ${kvCacheType === opt.id
-                              ? "bg-primary/10 border-primary ring-1 ring-primary/20"
-                              : "bg-secondary/40 border-border hover:border-primary/50"
-                            }
+                                                        ${
+                                                          kvCacheType === opt.id
+                                                            ? "bg-primary/10 border-primary ring-1 ring-primary/20"
+                                                            : "bg-secondary/40 border-border hover:border-primary/50"
+                                                        }
                                                         ${autoKvSwitch ? "opacity-70 grayscale-[0.5] cursor-not-allowed" : "cursor-pointer"}
                                                     `}
                         >

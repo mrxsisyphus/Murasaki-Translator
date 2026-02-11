@@ -311,7 +311,8 @@ export const translations = {
       gpuLayersAll: "全部 (All)",
       gpuLayersCustom: "自定义",
       gpuLayersDesc: "建议将所有层加载到 GPU，否则将导致翻译速度大幅下降",
-      promptPresetDesc: "小说模式适合连贯性长文本；剧本模式适合 Galgame脚本、动画字幕、漫画文本；单句模式:适合对齐要求高的短句，但翻译效率会大幅下降，不建议使用",
+      promptPresetDesc:
+        "小说模式适合连贯性长文本；剧本模式适合 Galgame脚本、动画字幕、漫画文本；单句模式:适合对齐要求高的短句，但翻译效率会大幅下降，不建议使用",
       concurrency: "并发任务数 (Parallel)",
     },
     glossaryView: {
@@ -451,7 +452,8 @@ export const translations = {
         vramSafe: "✓ 显存安全",
         vramRisk: "⚠ 显存风险",
         vramDetails: "模型: {model} + 系统/上下文预留: {overhead}GB",
-        promptPresetDesc: "轻小说模式适合所有小说和连贯性长文本；剧本模式适合 Galgame、动画字幕、漫画",
+        promptPresetDesc:
+          "轻小说模式适合所有小说和连贯性长文本；剧本模式适合 Galgame、动画字幕、漫画",
         localServer: "本地推理服务",
         localServerDesc: "在本地机器启动 llama-server",
         daemonAuto: "自动模式",
@@ -1036,7 +1038,8 @@ export const translations = {
         vramSafe: "✓ VRAM Safe",
         vramRisk: "⚠ VRAM Risk",
         vramDetails: "Model: {model} + Sys/Ctx: {overhead}GB",
-        promptPresetDesc: "Novel mode for novels; Script mode for Galgame/subtitles; Short mode (not recommended)",
+        promptPresetDesc:
+          "Novel mode for novels; Script mode for Galgame/subtitles; Short mode (not recommended)",
         localServer: "Local Inference Service",
         localServerDesc: "Starts llama-server on local machine",
         daemonAuto: "Auto",
@@ -1647,7 +1650,8 @@ export const translations = {
         vramSafe: "✓ VRAM 安全",
         vramRisk: "⚠ VRAM リスク",
         vramDetails: "モデル: {model} + システム/コンテキスト: {overhead}GB",
-        promptPresetDesc: "小説モードは小説向け、スクリプトモードはギャルゲ向け、短文モード（非推奨）",
+        promptPresetDesc:
+          "小説モードは小説向け、スクリプトモードはギャルゲ向け、短文モード（非推奨）",
         localServer: "ローカル推論サービス",
         localServerDesc: "ローカルマシンで llama-server を起動します",
         daemonAuto: "自動",

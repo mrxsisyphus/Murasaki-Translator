@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Card, Button } from "./core";
 import { AlertTriangle, Info, CheckCircle2, X, RefreshCw } from "lucide-react";
 

@@ -44,14 +44,19 @@ export function ModelView({ lang }: { lang: Language }) {
   const [showHFModal, setShowHFModal] = useState(false);
 
   // Model verification state: 'idle' | 'verifying' | 'valid' | 'invalid' | 'unknown'
-  type VerifyStatus = 'idle' | 'verifying' | 'valid' | 'invalid' | 'unknown';
-  const [verifyStatus, setVerifyStatus] = useState<Record<string, VerifyStatus>>({});
+  type VerifyStatus = "idle" | "verifying" | "valid" | "invalid" | "unknown";
+  const [verifyStatus, setVerifyStatus] = useState<
+    Record<string, VerifyStatus>
+  >({});
 
   // Cache key for verification results
-  const VERIFY_CACHE_KEY = 'model_verification_cache';
+  const VERIFY_CACHE_KEY = "model_verification_cache";
 
   // Load cached verification results
-  const loadVerifyCache = (): Record<string, { status: VerifyStatus; size: number }> => {
+  const loadVerifyCache = (): Record<
+    string,
+    { status: VerifyStatus; size: number }
+  > => {
     try {
       const cached = localStorage.getItem(VERIFY_CACHE_KEY);
       return cached ? JSON.parse(cached) : {};
@@ -61,7 +66,11 @@ export function ModelView({ lang }: { lang: Language }) {
   };
 
   // Save verification result to cache
-  const saveVerifyCache = (model: string, status: VerifyStatus, size: number) => {
+  const saveVerifyCache = (
+    model: string,
+    status: VerifyStatus,
+    size: number,
+  ) => {
     const cache = loadVerifyCache();
     cache[model] = { status, size };
     localStorage.setItem(VERIFY_CACHE_KEY, JSON.stringify(cache));
@@ -81,7 +90,7 @@ export function ModelView({ lang }: { lang: Language }) {
           // @ts-ignore
           const info = await window.api.getModelInfo(model);
           if (info) infoMap[model] = info;
-        } catch (e) { }
+        } catch (e) {}
       }
       setModelInfoMap(infoMap);
 
@@ -93,8 +102,15 @@ export function ModelView({ lang }: { lang: Language }) {
           const info = infoMap[model];
           // Check cache: only use cache if file size matches
           const cachedResult = cache[model];
-          if (cachedResult && info?.sizeGB && Math.abs(cachedResult.size - info.sizeGB) < 0.01) {
-            setVerifyStatus(prev => ({ ...prev, [model]: cachedResult.status }));
+          if (
+            cachedResult &&
+            info?.sizeGB &&
+            Math.abs(cachedResult.size - info.sizeGB) < 0.01
+          ) {
+            setVerifyStatus((prev) => ({
+              ...prev,
+              [model]: cachedResult.status,
+            }));
           }
           // 不再自动触发校验，用户需手动点击盾牌图标
         }
@@ -128,12 +144,12 @@ export function ModelView({ lang }: { lang: Language }) {
 
   // Verify model integrity against HuggingFace
   const verifyModel = async (model: string, sizeGB: number) => {
-    setVerifyStatus(prev => ({ ...prev, [model]: 'verifying' }));
+    setVerifyStatus((prev) => ({ ...prev, [model]: "verifying" }));
     try {
       // @ts-ignore - Get models directory path
       const modelsDir = await window.api?.getModelsPath?.();
       if (!modelsDir) {
-        setVerifyStatus(prev => ({ ...prev, [model]: 'unknown' }));
+        setVerifyStatus((prev) => ({ ...prev, [model]: "unknown" }));
         return;
       }
 
@@ -142,25 +158,25 @@ export function ModelView({ lang }: { lang: Language }) {
       // @ts-ignore
       const result = await window.api?.hfVerifyModel?.(
         APP_CONFIG.modelDownload.huggingfaceOrg,
-        filePath
+        filePath,
       );
 
-      let status: VerifyStatus = 'unknown';
+      let status: VerifyStatus = "unknown";
       if (result?.error) {
-        status = 'unknown';
-      } else if (result?.status === 'valid') {
-        status = 'valid';
-      } else if (result?.status === 'invalid') {
-        status = 'invalid';
-      } else if (result?.status === 'unknown') {
-        status = 'unknown';
+        status = "unknown";
+      } else if (result?.status === "valid") {
+        status = "valid";
+      } else if (result?.status === "invalid") {
+        status = "invalid";
+      } else if (result?.status === "unknown") {
+        status = "unknown";
       }
 
-      setVerifyStatus(prev => ({ ...prev, [model]: status }));
+      setVerifyStatus((prev) => ({ ...prev, [model]: status }));
       saveVerifyCache(model, status, sizeGB);
     } catch (e) {
-      console.error('Verification failed:', e);
-      setVerifyStatus(prev => ({ ...prev, [model]: 'unknown' }));
+      console.error("Verification failed:", e);
+      setVerifyStatus((prev) => ({ ...prev, [model]: "unknown" }));
     }
   };
 
@@ -518,10 +534,11 @@ export function ModelView({ lang }: { lang: Language }) {
                         onClick={() => handleSelect(model)}
                         className={`
                                                 group relative flex flex-col p-5 rounded-xl border cursor-pointer transition-all duration-300 ease-out select-none
-                                                ${isSelected
-                            ? "bg-purple-500/5 border-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.4)]"
-                            : "bg-card border-border/60 hover:border-purple-500/30 hover:shadow-lg hover:-translate-y-0.5"
-                          }
+                                                ${
+                                                  isSelected
+                                                    ? "bg-purple-500/5 border-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.4)]"
+                                                    : "bg-card border-border/60 hover:border-purple-500/30 hover:shadow-lg hover:-translate-y-0.5"
+                                                }
                                             `}
                       >
                         {/* Selection Checkmark */}
@@ -557,42 +574,54 @@ export function ModelView({ lang }: { lang: Language }) {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (info?.sizeGB && verifyStatus[model] !== 'verifying') {
+                                    if (
+                                      info?.sizeGB &&
+                                      verifyStatus[model] !== "verifying"
+                                    ) {
                                       verifyModel(model, info.sizeGB);
                                     }
                                   }}
-                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors ${verifyStatus[model] === 'verifying'
-                                    ? 'bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse'
-                                    : verifyStatus[model] === 'valid'
-                                      ? 'bg-green-500/10 text-green-600 border-green-500/20'
-                                      : verifyStatus[model] === 'invalid'
-                                        ? 'bg-red-500/10 text-red-600 border-red-500/20'
-                                        : verifyStatus[model] === 'unknown'
-                                          ? 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
-                                          : 'bg-secondary/50 text-muted-foreground border-border hover:bg-secondary hover:text-foreground'
-                                    }`}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                    verifyStatus[model] === "verifying"
+                                      ? "bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse"
+                                      : verifyStatus[model] === "valid"
+                                        ? "bg-green-500/10 text-green-600 border-green-500/20"
+                                        : verifyStatus[model] === "invalid"
+                                          ? "bg-red-500/10 text-red-600 border-red-500/20"
+                                          : verifyStatus[model] === "unknown"
+                                            ? "bg-yellow-500/10 text-yellow-600 border-yellow-500/20"
+                                            : "bg-secondary/50 text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
+                                  }`}
                                   title={
-                                    verifyStatus[model] === 'verifying' ? '校验中...'
-                                      : verifyStatus[model] === 'valid' ? '文件完整，与官方版本一致'
-                                        : verifyStatus[model] === 'invalid' ? '文件不完整，与官方版本大小不符'
-                                          : verifyStatus[model] === 'unknown' ? '无法匹配官方文件，可能是非官方版本'
-                                            : '点击校验完整性'
+                                    verifyStatus[model] === "verifying"
+                                      ? "校验中..."
+                                      : verifyStatus[model] === "valid"
+                                        ? "文件完整，与官方版本一致"
+                                        : verifyStatus[model] === "invalid"
+                                          ? "文件不完整，与官方版本大小不符"
+                                          : verifyStatus[model] === "unknown"
+                                            ? "无法匹配官方文件，可能是非官方版本"
+                                            : "点击校验完整性"
                                   }
                                 >
-                                  {verifyStatus[model] === 'verifying' ? (
+                                  {verifyStatus[model] === "verifying" ? (
                                     <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                                  ) : verifyStatus[model] === 'valid' ? (
+                                  ) : verifyStatus[model] === "valid" ? (
                                     <ShieldCheck className="w-2.5 h-2.5" />
-                                  ) : verifyStatus[model] === 'invalid' ? (
+                                  ) : verifyStatus[model] === "invalid" ? (
                                     <ShieldX className="w-2.5 h-2.5" />
                                   ) : (
                                     <ShieldQuestion className="w-2.5 h-2.5" />
                                   )}
-                                  {verifyStatus[model] === 'valid' ? '完整'
-                                    : verifyStatus[model] === 'invalid' ? '不完整'
-                                      : verifyStatus[model] === 'verifying' ? '校验中'
-                                        : verifyStatus[model] === 'unknown' ? '未知'
-                                          : '校验'}
+                                  {verifyStatus[model] === "valid"
+                                    ? "完整"
+                                    : verifyStatus[model] === "invalid"
+                                      ? "不完整"
+                                      : verifyStatus[model] === "verifying"
+                                        ? "校验中"
+                                        : verifyStatus[model] === "unknown"
+                                          ? "未知"
+                                          : "校验"}
                                 </button>
                               </div>
                             )}

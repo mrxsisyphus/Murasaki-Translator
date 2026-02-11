@@ -1,5 +1,44 @@
 # Murasaki Translator - Changelog
 
+## [1.6.3] - 2026-02-11
+
+### 核心稳定性
+
+*   远程任务状态流加固：修复取消/完成竞态，支持 `pending` 状态即时取消，避免终态被覆盖（`middleware/server/api_server.py`）。
+*   翻译 Worker 配置切换修复：重启判定覆盖 `model/ctx/gpu_layers/flash_attn/kv_cache_type`，避免“切参未生效”（`middleware/server/translation_worker.py`）。
+*   本地与远程默认参数对齐：`preset=novel`、`kv_cache_type=f16`（`middleware/server/api_server.py`, `GUI/src/main/remoteClient.ts`）。
+
+### 远程链路与容错
+
+*   `config_server` 正式接入主翻译链路：优先远程 URL，未配置时回落到本地/daemon（`GUI/src/main/index.ts`）。
+*   RemoteClient 协议对齐与健壮性增强：`snake_case -> camelCase`、URL 归一化、请求/上传/下载超时与重试（`GUI/src/main/remoteClient.ts`）。
+*   API 服务补充可配置安全策略：CORS 白名单与可选 WebSocket 鉴权（`middleware/server/api_server.py`）。
+
+### 本地部署与文件安全
+
+*   主进程文件 IPC 路径校验加强，并将核心读写改为异步，降低越权和阻塞风险（`GUI/src/main/index.ts`）。
+*   服务端路径校验改为安全归属判断（`relative_to` 语义），替代脆弱前缀判断（`middleware/server/api_server.py`, `middleware/server/translation_worker.py`）。
+
+### UI / Preload 与性能
+
+*   Preload 事件接口改为“订阅返回 `unsubscribe`”，移除 `removeAllListeners` 的全局误删风险，相关 UI 监听已迁移。
+*   Dashboard 高频监控改为 ring buffer + 节流刷新，降低长会话渲染压力（`GUI/src/renderer/src/components/Dashboard.tsx`）。
+*   远程连接测试与错误处理链路进一步对齐（`AdvancedView`, `index.ts`）。
+
+### 类型与日志链路
+
+*   `api.d.ts` 与 preload 实现对齐，清理陈旧声明并补齐 remote/HF/进度监听类型（`GUI/src/renderer/src/types/api.d.ts`）。
+*   主进程日志序列化加固，避免循环对象导致日志链路崩溃（`GUI/src/main/index.ts`）。
+*   `ServerManager` 日志改为固定上限，Windows 终止流程改为异步，降低主线程阻塞（`GUI/src/main/serverManager.ts`）。
+
+### 维护与验证
+
+*   本轮涉及文件已清理乱码注释/文案，并做 UTF-8 一致性检查。
+*   校验通过：`cd GUI && npx tsc --noEmit`。
+*   校验通过：`python -m py_compile middleware/server/api_server.py middleware/server/translation_worker.py`。
+
+---
+
 ## [1.6.2] - 2026-02-10
 
 ### 新增功能 (Features)

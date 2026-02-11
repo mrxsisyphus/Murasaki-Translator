@@ -333,13 +333,13 @@ export function RuleEditor({ lang, mode }: RuleEditorProps) {
   const presetGroups =
     mode === "pre"
       ? [
-        { key: "pre_novel", label: "轻小说预处理", desc: "保留段落间距" },
-        { key: "pre_general", label: "通用文本预处理", desc: "清理空行" },
-      ]
+          { key: "pre_novel", label: "轻小说预处理", desc: "保留段落间距" },
+          { key: "pre_general", label: "通用文本预处理", desc: "清理空行" },
+        ]
       : [
-        { key: "post_novel", label: "轻小说后处理", desc: "双换行格式" },
-        { key: "post_general", label: "通用文本后处理", desc: "单换行紧凑" },
-      ];
+          { key: "post_novel", label: "轻小说后处理", desc: "双换行格式" },
+          { key: "post_general", label: "通用文本后处理", desc: "单换行紧凑" },
+        ];
 
   const currentStepText =
     activeStep >= 0 && testSteps[activeStep]

@@ -13,8 +13,8 @@ export const APP_CONFIG = {
 
   // Model Download Links - 模型下载地址
   modelDownload: {
-    huggingfaceOrg: "Murasaki-Project",  // Organization name for auto-discovery
-    huggingface: "https://huggingface.co/Murasaki-Project",  // Organization homepage
+    huggingfaceOrg: "Murasaki-Project", // Organization name for auto-discovery
+    huggingface: "https://huggingface.co/Murasaki-Project", // Organization homepage
   },
 
   // Documentation

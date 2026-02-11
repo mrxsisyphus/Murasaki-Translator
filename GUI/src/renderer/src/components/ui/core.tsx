@@ -99,8 +99,8 @@ const buttonVariants = cva(
 
 export interface ButtonProps
   extends
-  React.ButtonHTMLAttributes<HTMLButtonElement>,
-  VariantProps<typeof buttonVariants> {
+    React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
   asChild?: boolean;
 }
 
@@ -227,7 +227,11 @@ interface TooltipProps {
 
 const Tooltip = ({ children, content, className }: TooltipProps) => {
   const [isVisible, setIsVisible] = React.useState(false);
-  const [position, setPosition] = React.useState({ top: 0, left: 0, placement: 'top' as 'top' | 'bottom' });
+  const [position, setPosition] = React.useState({
+    top: 0,
+    left: 0,
+    placement: "top" as "top" | "bottom",
+  });
   const triggerRef = React.useRef<HTMLDivElement>(null);
   const tooltipRef = React.useRef<HTMLDivElement>(null);
 
@@ -242,7 +246,10 @@ const Tooltip = ({ children, content, className }: TooltipProps) => {
       const spaceBelow = window.innerHeight - rect.bottom;
 
       // Prefer top, but use bottom if not enough space above
-      const placement = spaceAbove < tooltipHeight + spacing && spaceBelow > spaceAbove ? 'bottom' : 'top';
+      const placement =
+        spaceAbove < tooltipHeight + spacing && spaceBelow > spaceAbove
+          ? "bottom"
+          : "top";
 
       // Calculate left position with boundary check
       let left = rect.left + rect.width / 2;
@@ -251,7 +258,7 @@ const Tooltip = ({ children, content, className }: TooltipProps) => {
       left = Math.max(minLeft, Math.min(left, maxLeft));
 
       setPosition({
-        top: placement === 'top' ? rect.top - spacing : rect.bottom + spacing,
+        top: placement === "top" ? rect.top - spacing : rect.bottom + spacing,
         left,
         placement,
       });
@@ -298,12 +305,15 @@ const Tooltip = ({ children, content, className }: TooltipProps) => {
             style={{
               top: position.top,
               left: position.left,
-              transform: position.placement === 'top' ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+              transform:
+                position.placement === "top"
+                  ? "translate(-50%, -100%)"
+                  : "translate(-50%, 0)",
             }}
           >
             {content}
             {/* Arrow indicator */}
-            {position.placement === 'top' ? (
+            {position.placement === "top" ? (
               <div className="absolute top-full left-1/2 -translate-x-1/2 border-x-[5px] border-x-transparent border-t-[5px] border-t-popover" />
             ) : (
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-x-[5px] border-x-transparent border-b-[5px] border-b-popover" />

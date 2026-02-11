@@ -105,6 +105,14 @@ class TranslationWorker:
             "kv_cache_type": None
         }
 
+    @staticmethod
+    def _is_path_within(path: Path, base: Path) -> bool:
+        try:
+            path.resolve().relative_to(base.resolve())
+            return True
+        except ValueError:
+            return False
+
     def is_ready(self) -> bool:
         """检查服务器是否就绪"""
         if not self._server_ready:
@@ -305,10 +313,13 @@ class TranslationWorker:
         """
         request = task.request
         middleware_dir = Path(__file__).parent.parent
+        requested_model_path = request.model or self.model_path
+        if not requested_model_path:
+            raise ValueError("Model path is not set")
 
         # 构建新配置
-        new_config = {
-            "model_path": self.model_path,
+        effective_config = {
+            "model_path": requested_model_path,
             "ctx": request.ctx,
             "gpu_layers": request.gpu_layers,
             "flash_attn": request.flash_attn,
@@ -317,10 +328,14 @@ class TranslationWorker:
 
         # 检查配置是否变化（修复服务器参数"锁定"问题）
         config_changed = (
-            self._current_config["ctx"] != new_config["ctx"] or
-            self._current_config["gpu_layers"] != new_config["gpu_layers"] or
-            self._current_config["model_path"] != new_config["model_path"]
+            self._current_config["ctx"] != effective_config["ctx"] or
+            self._current_config["gpu_layers"] != effective_config["gpu_layers"] or
+            self._current_config["model_path"] != effective_config["model_path"] or
+            self._current_config["flash_attn"] != effective_config["flash_attn"] or
+            self._current_config["kv_cache_type"] != effective_config["kv_cache_type"]
         )
+
+        need_restart_server = False
 
         # 并发保护：有任务运行时拒绝配置变更，防止杀死正在运行的任务
         with self._tasks_lock:
@@ -329,22 +344,37 @@ class TranslationWorker:
                     # 有任务正在运行，拒绝配置变更
                     task.add_log(f"[Worker] 配置变化被拒绝：当前有 {self._running_tasks} 个任务正在运行")
                     task.add_log(f"[Worker] 使用当前配置继续 (ctx: {self._current_config['ctx']})")
+                    effective_config = {
+                        "model_path": self._current_config["model_path"] or requested_model_path,
+                        "ctx": self._current_config["ctx"] if self._current_config["ctx"] is not None else request.ctx,
+                        "gpu_layers": self._current_config["gpu_layers"] if self._current_config["gpu_layers"] is not None else request.gpu_layers,
+                        "flash_attn": self._current_config["flash_attn"] if self._current_config["flash_attn"] is not None else request.flash_attn,
+                        "kv_cache_type": self._current_config["kv_cache_type"] if self._current_config["kv_cache_type"] is not None else request.kv_cache_type
+                    }
                 else:
                     # 没有任务运行，可以安全重启
-                    task.add_log(f"[Worker] 配置变化 (ctx: {self._current_config['ctx']} -> {new_config['ctx']}), 重启服务器...")
-                    await self.stop_server()
+                    task.add_log(
+                        f"[Worker] 配置变化，重启服务器 "
+                        f"(ctx: {self._current_config['ctx']} -> {effective_config['ctx']}, "
+                        f"gpu_layers: {self._current_config['gpu_layers']} -> {effective_config['gpu_layers']})"
+                    )
+                    need_restart_server = True
 
             # 增加运行任务计数
             self._running_tasks += 1
 
         try:
+            if need_restart_server:
+                self.stop_server()
+
+            self.model_path = effective_config["model_path"]
             # 确保服务器已启动
             if not self.is_ready():
                 await self.start_server(
-                    gpu_layers=request.gpu_layers,
-                    ctx=request.ctx,
-                    flash_attn=request.flash_attn,
-                    kv_cache_type=request.kv_cache_type
+                    gpu_layers=effective_config["gpu_layers"],
+                    ctx=effective_config["ctx"],
+                    flash_attn=effective_config["flash_attn"],
+                    kv_cache_type=effective_config["kv_cache_type"]
                 )
 
             # 准备输入
@@ -371,7 +401,7 @@ class TranslationWorker:
                 ]
 
                 is_allowed = any(
-                    str(requested_path).startswith(str(allowed_dir))
+                    self._is_path_within(requested_path, allowed_dir)
                     for allowed_dir in allowed_dirs
                 )
 
@@ -401,8 +431,8 @@ class TranslationWorker:
                 "--preset", request.preset,
                 "--mode", request.mode,
                 "--chunk-size", str(request.chunk_size),
-                "--ctx", str(request.ctx),
-                "--gpu-layers", str(request.gpu_layers),
+                "--ctx", str(effective_config["ctx"]),
+                "--gpu-layers", str(effective_config["gpu_layers"]),
                 "--temperature", str(request.temperature),
                 # 关键修复：连接常驻服务器，不再每次启动新服务器
                 "--no-server-spawn",
@@ -411,10 +441,8 @@ class TranslationWorker:
             ]
 
             # 可选参数
-            if request.model:
-                cmd.extend(["--model", request.model])
-            elif self.model_path:
-                cmd.extend(["--model", self.model_path])
+            if effective_config["model_path"]:
+                cmd.extend(["--model", effective_config["model_path"]])
 
             if request.glossary:
                 cmd.extend(["--glossary", request.glossary])
@@ -437,11 +465,11 @@ class TranslationWorker:
             if request.parallel > 1:
                 cmd.extend(["--parallel", str(request.parallel)])
 
-            if request.flash_attn:
+            if effective_config["flash_attn"]:
                 cmd.append("--flash-attn")
 
-            if request.kv_cache_type:
-                cmd.extend(["--kv-cache-type", request.kv_cache_type])
+            if effective_config["kv_cache_type"]:
+                cmd.extend(["--kv-cache-type", effective_config["kv_cache_type"]])
 
             # 执行翻译
             task.add_log(f"[INFO] Running translation (using persistent server on port {self.server_port})...")

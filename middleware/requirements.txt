@@ -4,6 +4,9 @@
 
 # HTTP client for server mode
 requests>=2.28.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0
 
 # EPUB handling
 lxml>=4.9.0

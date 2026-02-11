@@ -30,7 +30,12 @@ export function useFileQueue(): UseFileQueueReturn {
   // Load from localStorage on init
   const [fileQueue, setFileQueue] = useState<string[]>(() => {
     const saved = localStorage.getItem("file_queue");
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return [];
+    }
   });
 
   const [currentIndex, setCurrentIndex] = useState(-1);

@@ -98,7 +98,9 @@ function AppContent() {
         setView={handleSwitchView}
       />
       {/* Keep Dashboard mounted to preserve translation state (logs, process listeners) */}
-      <div className={`flex-1 min-w-0 ${view === "dashboard" ? "flex" : "hidden"}`}>
+      <div
+        className={`flex-1 min-w-0 ${view === "dashboard" ? "flex" : "hidden"}`}
+      >
         <Dashboard
           ref={dashboardRef}
           lang={lang}

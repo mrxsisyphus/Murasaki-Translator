@@ -1,6 +1,6 @@
 import { platform, arch } from "os";
 import { join } from "path";
-import { existsSync } from "fs";
+import { existsSync, chmodSync } from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { is } from "@electron-toolkit/utils";
@@ -28,7 +28,7 @@ let cachedHasNvidiaGpu: boolean | null = null;
  */
 export function clearGpuCache(): void {
   cachedHasNvidiaGpu = null;
-  console.log('[Platform] GPU cache cleared, will re-detect on next request');
+  console.log("[Platform] GPU cache cleared, will re-detect on next request");
 }
 
 /**
@@ -41,13 +41,14 @@ export async function hasNvidiaGpuAsync(): Promise<boolean> {
   }
 
   // Windows 上 nvidia-smi 可能不在 PATH 中，尝试多个路径
-  const commands = process.platform === 'win32'
-    ? [
-      'nvidia-smi --query-gpu=name --format=csv,noheader',
-      '"C:\\Windows\\System32\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
-      '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader'
-    ]
-    : ['nvidia-smi --query-gpu=name --format=csv,noheader'];
+  const commands =
+    process.platform === "win32"
+      ? [
+          "nvidia-smi --query-gpu=name --format=csv,noheader",
+          '"C:\\Windows\\System32\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
+          '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
+        ]
+      : ["nvidia-smi --query-gpu=name --format=csv,noheader"];
 
   for (const cmd of commands) {
     try {
@@ -66,10 +67,11 @@ export async function hasNvidiaGpuAsync(): Promise<boolean> {
   }
 
   cachedHasNvidiaGpu = false;
-  console.log('[Platform] No NVIDIA GPU detected (async), using Vulkan/Metal fallback');
+  console.log(
+    "[Platform] No NVIDIA GPU detected (async), using Vulkan/Metal fallback",
+  );
   return false;
 }
-
 
 /**
  * 同步检测 NVIDIA GPU - 仅用于必须同步的场景
@@ -83,13 +85,14 @@ function hasNvidiaGpuSync(): boolean {
   const { execSync } = require("child_process");
 
   // Windows 上 nvidia-smi 可能不在 PATH 中，尝试多个路径
-  const commands = process.platform === 'win32'
-    ? [
-      'nvidia-smi --query-gpu=name --format=csv,noheader',
-      '"C:\\Windows\\System32\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
-      '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader'
-    ]
-    : ['nvidia-smi --query-gpu=name --format=csv,noheader'];
+  const commands =
+    process.platform === "win32"
+      ? [
+          "nvidia-smi --query-gpu=name --format=csv,noheader",
+          '"C:\\Windows\\System32\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
+          '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe" --query-gpu=name --format=csv,noheader',
+        ]
+      : ["nvidia-smi --query-gpu=name --format=csv,noheader"];
 
   for (const cmd of commands) {
     try {
@@ -110,10 +113,9 @@ function hasNvidiaGpuSync(): boolean {
   }
 
   cachedHasNvidiaGpu = false;
-  console.log('[Platform] No NVIDIA GPU detected, using Vulkan/Metal fallback');
+  console.log("[Platform] No NVIDIA GPU detected, using Vulkan/Metal fallback");
   return false;
 }
-
 
 /**
  * 获取 middleware 目录路径
@@ -187,19 +189,54 @@ export function detectPlatform(): PlatformInfo {
 export function getLlamaServerPath(): string {
   const middlewareDir = getMiddlewarePath();
   const info = detectPlatform();
+  const binaryName = info.binaryName;
 
-  // 1. 尝试新的 bin/{platform}/ 目录
-  const newPath = join(info.binaryDir, info.binaryName);
-  if (existsSync(newPath)) {
-    return newPath;
+  const fallbackSubdirsByOs: Record<PlatformOS, string[]> = {
+    win32: ["win-cuda", "win-vulkan", "win-cpu"],
+    darwin: ["darwin-metal", "darwin-x64"],
+    linux: ["linux-cuda", "linux-vulkan", "linux-cpu"],
+  };
+
+  const orderedSubdirs = [
+    info.subdir,
+    ...fallbackSubdirsByOs[info.os].filter((subdir) => subdir !== info.subdir),
+  ];
+
+  for (const subdir of orderedSubdirs) {
+    const candidate = join(middlewareDir, "bin", subdir, binaryName);
+    if (!existsSync(candidate)) continue;
+
+    if (info.os !== "win32") {
+      try {
+        chmodSync(candidate, 0o755);
+      } catch {
+        // ignore chmod failure and continue with executable check
+      }
+    }
+
+    if (subdir !== info.subdir) {
+      console.log(
+        `[platform] Preferred backend binary missing, fallback to: ${subdir}`,
+      );
+    }
+    return candidate;
   }
+
+  const newPath = join(info.binaryDir, info.binaryName);
 
   // 2. 回退：扫描 middleware 目录下的旧结构
   const fs = require("fs");
   if (existsSync(middlewareDir)) {
     for (const subdir of fs.readdirSync(middlewareDir)) {
-      const candidate = join(middlewareDir, subdir, info.binaryName);
+      const candidate = join(middlewareDir, subdir, binaryName);
       if (existsSync(candidate)) {
+        if (info.os !== "win32") {
+          try {
+            chmodSync(candidate, 0o755);
+          } catch {
+            // ignore chmod failure and continue
+          }
+        }
         console.log(`[platform] Using legacy path: ${candidate}`);
         return candidate;
       }
