@@ -94,6 +94,7 @@ class TranslationWorker:
         self._lock = threading.Lock()
         self._server_ready = False
         self._server_log_handle = None
+        self._server_pid_path = Path(__file__).parent.parent / "llama-daemon.pid"
 
         # 并发控制：防止配置变更时杀死正在运行的任务
         self._running_tasks = 0  # 正在运行的任务数
@@ -330,6 +331,13 @@ class TranslationWorker:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
 
+        # Persist PID so external callers can ensure cleanup
+        try:
+            if self.server_process and self.server_process.pid:
+                self._server_pid_path.write_text(str(self.server_process.pid), encoding="utf-8")
+        except OSError:
+            pass
+
         # 等待服务器就绪
         await self._wait_for_server_ready()
         self._server_ready = True
@@ -356,6 +364,7 @@ class TranslationWorker:
 
     def stop_server(self):
         """停止常驻服务器（进程组销毁）"""
+        pid = None
         if self.server_process:
             pid = self.server_process.pid
 
@@ -382,6 +391,29 @@ class TranslationWorker:
 
             self.server_process = None
             self._server_ready = False
+        # Fallback: kill by persisted PID if needed
+        if pid is None:
+            try:
+                if self._server_pid_path.exists():
+                    pid_text = self._server_pid_path.read_text(encoding="utf-8").strip()
+                    pid = int(pid_text) if pid_text.isdigit() else None
+            except OSError:
+                pid = None
+        if pid and sys.platform == "win32":
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True,
+                    timeout=5
+                )
+            except subprocess.TimeoutExpired:
+                pass
+
+        try:
+            if self._server_pid_path.exists():
+                self._server_pid_path.unlink()
+        except OSError:
+            pass
         if self._server_log_handle:
             try:
                 self._server_log_handle.close()

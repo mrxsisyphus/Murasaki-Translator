@@ -843,6 +843,27 @@ sys.exit(0 if not missing else 3)
       await this.waitForProcessClose(managedProcess, 1500);
     }
 
+    // Extra safety: kill persisted llama-server PID if present
+    if (process.platform === "win32") {
+      try {
+        const pidFile = resolve(getMiddlewarePath(), "llama-daemon.pid");
+        if (fs.existsSync(pidFile)) {
+          const raw = fs.readFileSync(pidFile, "utf-8").trim();
+          const parsed = Number.parseInt(raw, 10);
+          if (Number.isFinite(parsed)) {
+            await this.killWindowsProcessTree(parsed);
+          }
+          try {
+            fs.unlinkSync(pidFile);
+          } catch {
+            // ignore pid file cleanup failure
+          }
+        }
+      } catch {
+        // ignore pid cleanup failure
+      }
+    }
+
     this.process = null;
     this.model = null;
     this.apiKey = null;
