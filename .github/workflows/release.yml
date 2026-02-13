@@ -99,6 +99,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item ".github/release-docs/README-windows-cuda.md" -Destination "release/readme.md" -Force
+          Copy-Item "LICENSE" -Destination "release/LICENSE.Murasaki Translator.txt" -Force
 
       - name: Build
         working-directory: GUI
@@ -174,6 +175,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item ".github/release-docs/README-windows-vulkan.md" -Destination "release/readme.md" -Force
+          Copy-Item "LICENSE" -Destination "release/LICENSE.Murasaki Translator.txt" -Force
 
       - name: Build
         working-directory: GUI
@@ -315,6 +317,7 @@ jobs:
         run: |
           mkdir -p release
           cp .github/release-docs/README-macos.md release/readme.md
+          cp LICENSE "release/LICENSE.Murasaki Translator.txt"
 
       - name: Build for ARM64
         working-directory: GUI
@@ -457,6 +460,7 @@ jobs:
         run: |
           mkdir -p release
           cp .github/release-docs/README-linux-gui.md release/readme.md
+          cp LICENSE "release/LICENSE.Murasaki Translator.txt"
 
       - name: Build GUI
         working-directory: GUI
@@ -469,13 +473,21 @@ jobs:
       - name: Package CLI Server
         run: |
           mkdir -p dist-cli/murasaki-server
-          cp -r middleware/bin dist-cli/murasaki-server/
+          mkdir -p dist-cli/murasaki-server/bin
+          cp -r middleware/bin/linux-vulkan dist-cli/murasaki-server/bin/
+          if [ -d middleware/bin/linux-cpu ]; then
+            cp -r middleware/bin/linux-cpu dist-cli/murasaki-server/bin/
+          fi
+          if [ -d middleware/bin/linux-cuda ]; then
+            cp -r middleware/bin/linux-cuda dist-cli/murasaki-server/bin/
+          fi
           cp -r middleware/murasaki_translator dist-cli/murasaki-server/
           cp -r middleware/openai_proxy dist-cli/murasaki-server/
           cp -r middleware/server dist-cli/murasaki-server/
           cp middleware/cli/murasaki_server.py dist-cli/murasaki-server/
           cp middleware/requirements.txt dist-cli/murasaki-server/
           cp middleware/rule_processor.py dist-cli/murasaki-server/
+          mkdir -p dist-cli/murasaki-server/glossaries
 
           # Merge requirements
           echo "" >> dist-cli/murasaki-server/requirements.txt
@@ -492,7 +504,12 @@ jobs:
           EOF
           chmod +x dist-cli/murasaki-server/start.sh
           chmod +x dist-cli/murasaki-server/bin/linux-vulkan/llama-server
-          chmod +x dist-cli/murasaki-server/bin/linux-cpu/llama-server
+          if [ -f dist-cli/murasaki-server/bin/linux-cpu/llama-server ]; then
+            chmod +x dist-cli/murasaki-server/bin/linux-cpu/llama-server
+          fi
+          if [ -f dist-cli/murasaki-server/bin/linux-cuda/llama-server ]; then
+            chmod +x dist-cli/murasaki-server/bin/linux-cuda/llama-server
+          fi
 
           # Add README and LICENSE
           cp .github/release-docs/README-linux-cli.md dist-cli/murasaki-server/README.md
@@ -588,27 +605,27 @@ jobs:
 
           # WebSocket contract test (use python websockets to avoid Node global WebSocket issues)
           .venv/bin/python - <<'PY'
-import asyncio
-import json
-import sys
-import websockets
+          import asyncio
+          import json
+          import sys
+          import websockets
 
-task_id = open('/tmp/task_id.txt', encoding='utf-8').read().strip()
-url = f"ws://127.0.0.1:18080/api/v1/ws/{task_id}?token=smoke-test-key"
+          task_id = open('/tmp/task_id.txt', encoding='utf-8').read().strip()
+          url = f"ws://127.0.0.1:18080/api/v1/ws/{task_id}?token=smoke-test-key"
 
-async def main():
-    try:
-        async with websockets.connect(url, open_timeout=5) as ws:
-            msg = await asyncio.wait_for(ws.recv(), timeout=10)
-            payload = json.loads(msg)
-            if not isinstance(payload, dict) or "type" not in payload:
-                raise RuntimeError("websocket payload missing type")
-    except Exception as exc:
-        print(exc)
-        sys.exit(1)
+          async def main():
+              try:
+                  async with websockets.connect(url, open_timeout=5) as ws:
+                      msg = await asyncio.wait_for(ws.recv(), timeout=10)
+                      payload = json.loads(msg)
+                      if not isinstance(payload, dict) or "type" not in payload:
+                          raise RuntimeError("websocket payload missing type")
+              except Exception as exc:
+                  print(exc)
+                  sys.exit(1)
 
-asyncio.run(main())
-PY
+          asyncio.run(main())
+          PY
 
           CANCEL_CODE=$(curl -sS -o /tmp/cancel_task.json -w "%{http_code}" \
             -X DELETE \

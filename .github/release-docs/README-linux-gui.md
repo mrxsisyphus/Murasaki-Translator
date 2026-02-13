@@ -24,23 +24,21 @@ sudo apt install python3 python3-pip libvulkan1
 sudo apt install mesa-vulkan-drivers
 ```
 
-## 快速开始
+## 快速开始 (AppImage)
 
 1. **下载模型**: 前往 [Hugging Face](https://huggingface.co/Murasaki-Project) 下载 GGUF 模型文件
-2. **解压软件**: `tar -xzf Murasaki-Translator-linux-x64.tar.gz`
-3. **放置模型**: 将模型放入 `resources/middleware/models` 目录
-4. **启动软件**: `./murasaki-translator`
-
-## AppImage 用户
-
-```bash
-chmod +x Murasaki-Translator.AppImage
-./Murasaki-Translator.AppImage
-```
+2. **设置可执行权限**:
+   ```bash
+   chmod +x Murasaki-Translator-*.AppImage
+   ```
+3. **启动软件**:
+   ```bash
+   ./Murasaki-Translator-*.AppImage
+   ```
 
 ## 故障排查
 
-- **权限错误**: `chmod +x murasaki-translator`
+- **权限错误**: `chmod +x Murasaki-Translator-*.AppImage`
 - **缺少 Vulkan**: `sudo apt install libvulkan1 mesa-vulkan-drivers`
 - **NVIDIA 检测失败**: 确认 `nvidia-smi` 命令可用
 

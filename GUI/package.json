@@ -25,7 +25,20 @@
     },
     "win": {
       "target": "zip",
-      "icon": "resources/icon.png"
+      "icon": "resources/icon.png",
+      "extraResources": [
+        {
+          "from": "../python_env",
+          "to": "python_env",
+          "filter": [
+            "**/*",
+            "!**/__pycache__/*",
+            "!**/Scripts/*.pdb",
+            "!**/Lib/test/*",
+            "!get-pip.py"
+          ]
+        }
+      ]
     },
     "mac": {
       "target": "dmg",
@@ -80,17 +93,6 @@
           "!**/llama-b*-bin-*/**",
           "!**/server.log",
           "!**/test_*.py"
-        ]
-      },
-      {
-        "from": "../python_env",
-        "to": "python_env",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/*",
-          "!**/Scripts/*.pdb",
-          "!**/Lib/test/*",
-          "!get-pip.py"
         ]
       }
     ],
