@@ -717,6 +717,8 @@ class TranslationWorker:
             # 设置环境变量确保日志即时性
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            if request.gpu_device_id:
+                env["CUDA_VISIBLE_DEVICES"] = str(request.gpu_device_id)
 
             # 使用进程组启动，确保 cancel 时子进程一起销毁
             if sys.platform != 'win32':

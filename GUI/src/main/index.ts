@@ -7,6 +7,7 @@ import {
   Notification,
   nativeTheme,
 } from "electron";
+import type { Event as ElectronEvent } from "electron";
 import { join, basename, resolve, relative, isAbsolute, dirname } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import { spawn, ChildProcess } from "child_process";
@@ -263,7 +264,7 @@ const handleAppShutdown = async (): Promise<void> => {
   app.exit(0);
 };
 
-app.on("before-quit", (event) => {
+app.on("before-quit", (event: ElectronEvent) => {
   event.preventDefault();
   void handleAppShutdown();
 });
@@ -271,7 +272,7 @@ app.on("before-quit", (event) => {
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
-app.on("window-all-closed", (event) => {
+app.on("window-all-closed", (event: ElectronEvent) => {
   if (process.platform !== "darwin") {
     event.preventDefault();
     void handleAppShutdown();
@@ -3306,6 +3307,22 @@ ipcMain.handle(
       const { basename, extname, join } = await import("path");
       const fs = await import("fs");
 
+      const remoteUrl = String(
+        config?.remoteUrl || config?.serverUrl || "",
+      ).trim();
+      if (config?.executionMode === "remote" && remoteUrl) {
+        try {
+          const parsed = new URL(remoteUrl);
+          const host = parsed.hostname.toLowerCase();
+          const isLocalHost = host === "127.0.0.1" || host === "localhost";
+          if (!isLocalHost) {
+            return { exists: false };
+          }
+        } catch {
+          // ignore malformed URL
+        }
+      }
+
       let outPath = "";
 
       // Logic must match main.py and start-translation handler
@@ -3419,19 +3436,75 @@ const normalizeLineTolerancePct = (value: unknown, fallback: number = 0.2): numb
   return numeric;
 };
 
+const sanitizeRemoteConfig = (config: any, externalRemote: boolean) => {
+  if (!externalRemote) return config;
+  const next = { ...config };
+  next.resume = false;
+  if ("cacheDir" in next) {
+    delete next.cacheDir;
+  }
+  return next;
+};
+
+const sanitizePathSegment = (value: string) =>
+  value.replace(/[<>:"/\\|?*\s]+/g, "_");
+
+const resolveScopedRemoteOutputDir = (
+  inputFile: string,
+  serverUrl: string,
+): string => {
+  const baseDir = dirname(inputFile);
+  let hostPort = "remote";
+  try {
+    const parsed = new URL(serverUrl);
+    const port =
+      parsed.port ||
+      (parsed.protocol === "https:" ? "443" : "80");
+    hostPort = `${parsed.hostname}_${port}`;
+  } catch {
+    hostPort = "remote";
+  }
+  const safeSegment = sanitizePathSegment(hostPort);
+  return join(baseDir, "_remote_outputs", safeSegment);
+};
+
+const ensureUniquePath = (targetPath: string): string => {
+  if (!fs.existsSync(targetPath)) return targetPath;
+  const ext = targetPath.includes(".") ? `.${targetPath.split(".").pop()}` : "";
+  const base = ext ? targetPath.slice(0, -ext.length) : targetPath;
+  for (let i = 1; i < 10000; i += 1) {
+    const candidate = `${base}_${i}${ext}`;
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  return targetPath;
+};
+
 const resolveTranslationOutputPath = (
   inputFile: string,
   effectiveModelPath: string,
   config: any,
+  options?: { externalRemote?: boolean; serverUrl?: string },
 ): string => {
   const outputDir = String(config?.outputDir || "").trim();
+  const externalRemote = options?.externalRemote === true;
+  const serverUrl = options?.serverUrl || "";
+  let resolvedOutputDir = "";
+
   if (outputDir && fs.existsSync(outputDir)) {
+    resolvedOutputDir = outputDir;
+  } else if (externalRemote && serverUrl) {
+    resolvedOutputDir = resolveScopedRemoteOutputDir(inputFile, serverUrl);
+    fs.mkdirSync(resolvedOutputDir, { recursive: true });
+  }
+
+  if (resolvedOutputDir) {
     const ext = inputFile.split(".").pop() || "";
     const baseName = ext ? basename(inputFile, `.${ext}`) : basename(inputFile);
     const outFilename = ext
       ? `${baseName}_translated.${ext}`
       : `${baseName}_translated`;
-    return join(outputDir, outFilename);
+    const outputPath = join(resolvedOutputDir, outFilename);
+    return externalRemote ? ensureUniquePath(outputPath) : outputPath;
   }
 
   const ext = inputFile.includes(".") ? `.${inputFile.split(".").pop()}` : "";
@@ -3439,7 +3512,8 @@ const resolveTranslationOutputPath = (
   const normalizedPath = effectiveModelPath.replace(/\\/g, "/");
   const fileName = normalizedPath.split("/").pop() || "";
   const modelName = fileName.replace(/\.gguf$/i, "") || "unknown";
-  return `${base}_${modelName}${ext}`;
+  const fallbackPath = `${base}_${modelName}${ext}`;
+  return externalRemote ? ensureUniquePath(fallbackPath) : fallbackPath;
 };
 
 const buildRemoteTranslateOptionsFromConfig = (
@@ -3462,7 +3536,7 @@ const buildRemoteTranslateOptionsFromConfig = (
   return {
     filePath: remoteFilePath,
     model: effectiveModelPath || undefined,
-    glossary: config?.glossaryPath,
+    glossary: config?.glossaryPath || undefined,
     preset: config?.preset || "novel",
     mode: config?.mode || "doc",
     chunkSize: toInt(config?.chunkSize, 1000),
@@ -3480,7 +3554,7 @@ const buildRemoteTranslateOptionsFromConfig = (
     alignmentMode: config?.alignmentMode === true,
     resume: config?.resume === true,
     saveCache: config?.saveCache !== false,
-    cachePath: config?.cacheDir,
+    cachePath: config?.cacheDir || undefined,
     rulesPreInline: Array.isArray(config?.rulesPre) ? config.rulesPre : undefined,
     rulesPostInline: Array.isArray(config?.rulesPost) ? config.rulesPost : undefined,
     repPenaltyBase: toFloat(config?.repPenaltyBase, 1.0),
@@ -3543,15 +3617,50 @@ const runTranslationViaRemoteApi = async (
     inputFile: string;
     effectiveModelPath: string;
     config: any;
+    isExternalRemote: boolean;
   },
 ) => {
-  const { client, sourceLabel, inputFile, effectiveModelPath, config } = params;
-  const outputPath = resolveTranslationOutputPath(inputFile, effectiveModelPath, config);
+  const {
+    client,
+    sourceLabel,
+    inputFile,
+    effectiveModelPath,
+    config,
+    isExternalRemote,
+  } = params;
+  const serverUrl = client.getBaseUrl?.() || "";
+  const sanitizedConfig = sanitizeRemoteConfig(config, isExternalRemote);
+  const outputPath = resolveTranslationOutputPath(
+    inputFile,
+    effectiveModelPath,
+    sanitizedConfig,
+    { externalRemote: isExternalRemote, serverUrl },
+  );
   let taskId = "";
   let nextLogIndex = 0;
   let lastProgressSig = "";
-  const serverUrl = client.getBaseUrl?.() || "";
   let serverVersion = "";
+  let wsActive = false;
+  let wsClient: WebSocket | null = null;
+  let lastProgressSeenAt = 0;
+  let lastWsLogAt = 0;
+
+  const handleRemoteLogLine = (logLine: string, source: "ws" | "poll") => {
+    if (!logLine) return;
+    if (logLine.includes("JSON_PROGRESS:")) {
+      lastProgressSeenAt = Date.now();
+    }
+    if (source === "ws") {
+      lastWsLogAt = Date.now();
+    }
+    event.reply("log-update", `${logLine}\n`);
+    appendRemoteMirrorMessage({
+      taskId,
+      serverUrl,
+      model: effectiveModelPath,
+      message: logLine,
+    });
+  };
 
   try {
     try {
@@ -3595,7 +3704,7 @@ const runTranslationViaRemoteApi = async (
     });
 
     const options = buildRemoteTranslateOptionsFromConfig(
-      config,
+      sanitizedConfig,
       effectiveModelPath,
       uploaded.serverPath,
     );
@@ -3622,38 +3731,57 @@ const runTranslationViaRemoteApi = async (
       })}\n`,
     );
 
+    try {
+      wsClient = client.connectWebSocket(taskId, {
+        onLog: (message) => {
+          wsActive = true;
+          handleRemoteLogLine(message, "ws");
+        },
+        onOpen: () => {
+          wsActive = true;
+        },
+        onClose: () => {
+          wsActive = false;
+        },
+        onError: () => {
+          wsActive = false;
+        },
+      });
+    } catch {
+      wsClient = null;
+      wsActive = false;
+    }
+
     while (true) {
       if (!remoteTranslationBridge || remoteTranslationBridge.taskId !== taskId) return;
       const status = await client.getTaskStatus(taskId, {
         logFrom: nextLogIndex,
-        logLimit: 200,
+        logLimit: wsActive ? 80 : 200,
       });
       if (!remoteTranslationBridge || remoteTranslationBridge.taskId !== taskId) return;
 
       const taskLogs = Array.isArray(status.logs) ? status.logs : [];
+      if (wsActive && lastWsLogAt > 0 && Date.now() - lastWsLogAt > 2000) {
+        wsActive = false;
+      }
       // 检查日志中是否已含 main.py 输出的 JSON_PROGRESS（含真实速度/token 数据）
       const logsContainProgress = taskLogs.some((log) => typeof log === "string" && log.includes("JSON_PROGRESS:"));
-      if (taskLogs.length > 0) {
-        event.reply("log-update", `${taskLogs.join("\n")}\n`);
+      if (taskLogs.length > 0 && !wsActive) {
         taskLogs.forEach((logLine) => {
           if (!logLine) return;
-          appendRemoteMirrorMessage({
-            taskId,
-            serverUrl,
-            model: effectiveModelPath,
-            message: logLine,
-          });
+          handleRemoteLogLine(logLine, "poll");
         });
       }
       if (typeof status.nextLogIndex === "number" && Number.isFinite(status.nextLogIndex)) {
-        nextLogIndex = status.nextLogIndex;
+        nextLogIndex = Math.max(nextLogIndex, status.nextLogIndex);
       } else {
-        nextLogIndex += taskLogs.length;
+        nextLogIndex = Math.max(nextLogIndex, nextLogIndex + taskLogs.length);
       }
 
       // 仅当日志中无 JSON_PROGRESS 时才发送补充性 block 进度
       // 避免用硬编码零值覆盖 main.py 的真实速度/token 数据
-      if (!logsContainProgress) {
+      const recentlySawProgress = Date.now() - lastProgressSeenAt < 1500;
+      if (!logsContainProgress && !recentlySawProgress) {
         const percentRaw =
           typeof status.progress === "number" && Number.isFinite(status.progress)
             ? status.progress <= 1
@@ -3683,15 +3811,9 @@ const runTranslationViaRemoteApi = async (
           });
           const finalLogs = Array.isArray(finalStatus.logs) ? finalStatus.logs : [];
           if (finalLogs.length > 0) {
-            event.reply("log-update", `${finalLogs.join("\n")}\n`);
             finalLogs.forEach((logLine) => {
               if (!logLine) return;
-              appendRemoteMirrorMessage({
-                taskId,
-                serverUrl,
-                model: effectiveModelPath,
-                message: logLine,
-              });
+              handleRemoteLogLine(logLine, "poll");
             });
           }
         }
@@ -3765,6 +3887,13 @@ const runTranslationViaRemoteApi = async (
       stopRequested,
     });
   } finally {
+    if (wsClient) {
+      try {
+        wsClient.close();
+      } catch {
+        // ignore ws close failure
+      }
+    }
     translationStopRequested = false;
     if (taskId && remoteActiveTaskId === taskId) {
       remoteActiveTaskId = null;
@@ -3858,6 +3987,20 @@ ipcMain.on("start-translation", async (event, { inputFile, modelPath, config }) 
     ""
   ).trim();
 
+  const isExternalRemote = (() => {
+    if (remoteSession?.source === "local-daemon") return false;
+    if (
+      remoteExecutionSource === "local-daemon-api_v1" ||
+      remoteExecutionSource === "connected-local-daemon"
+    ) {
+      return false;
+    }
+    if (remoteExecutionSource === "configured-remote-url" && configuredRemoteUrl) {
+      return detectRemoteSessionSource(configuredRemoteUrl) !== "local-daemon";
+    }
+    return true;
+  })();
+
   if (remoteExecutionClient) {
     await runTranslationViaRemoteApi(event, {
       client: remoteExecutionClient,
@@ -3865,6 +4008,7 @@ ipcMain.on("start-translation", async (event, { inputFile, modelPath, config }) 
       inputFile,
       effectiveModelPath: effectiveRemoteModelPath,
       config,
+      isExternalRemote,
     });
     return;
   }

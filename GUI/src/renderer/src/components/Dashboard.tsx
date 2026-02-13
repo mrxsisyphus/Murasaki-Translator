@@ -77,6 +77,12 @@ interface RemoteModelInfo {
   sizeGb?: number;
 }
 
+interface GlossaryOption {
+  label: string;
+  value: string;
+  matchKey: string;
+}
+
 export const Dashboard = forwardRef<any, DashboardProps>(
   ({ lang, active, onRunningChange, remoteRuntime }, ref) => {
     const t = translations[lang];
@@ -151,6 +157,8 @@ export const Dashboard = forwardRef<any, DashboardProps>(
       () => localStorage.getItem("config_preset") || "novel",
     );
     const [glossaryPath, setGlossaryPath] = useState<string>("");
+    const [localGlossaries, setLocalGlossaries] = useState<GlossaryOption[]>([]);
+    const [remoteGlossaries, setRemoteGlossaries] = useState<GlossaryOption[]>([]);
     const [models, setModels] = useState<string[]>([]);
     const [modelsInfoMap, setModelsInfoMap] = useState<
       Record<string, { paramsB?: number; sizeGB?: number }>
@@ -162,8 +170,11 @@ export const Dashboard = forwardRef<any, DashboardProps>(
     const modelInfoRef = useRef<any>(null); // Added for modelInfoRef.current
     const modelInfo = modelInfoRef.current;
     const isRemoteMode = Boolean(remoteRuntime?.isRemoteMode);
+    const isRemoteModeRef = useRef(isRemoteMode);
+    const glossarySelectionEphemeralRef = useRef(false);
     const activeModelPath = isRemoteMode ? remoteModelPath : modelPath;
     const activeModelsCount = isRemoteMode ? remoteModels.length : models.length;
+    const activeGlossaries = isRemoteMode ? remoteGlossaries : localGlossaries;
     const selectedRemoteInfo = isRemoteMode
       ? remoteModels.find((model) => model.path === remoteModelPath)
       : null;
@@ -185,7 +196,18 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         setModelsInfoMap(infoMap);
       }
       const g = await window.api?.getGlossaries();
-      if (g) setGlossaries(g);
+      if (g) {
+        const mapped = g.map((item) => {
+          const fileName = String(item || "");
+          const matchKey = fileName.replace(/\.json$/i, "");
+          return {
+            label: fileName,
+            value: fileName,
+            matchKey,
+          };
+        });
+        setLocalGlossaries(mapped);
+      }
     };
 
     const fetchRemoteModels = async () => {
@@ -215,12 +237,51 @@ export const Dashboard = forwardRef<any, DashboardProps>(
       setRemoteLoading(false);
     };
 
+    const fetchRemoteGlossaries = async () => {
+      if (!isRemoteMode) {
+        setRemoteGlossaries([]);
+        return;
+      }
+      try {
+        // @ts-ignore
+        const result = await window.api?.remoteGlossaries?.();
+        if (result?.ok && Array.isArray(result.data)) {
+          const mapped = result.data
+            .map((item: any) => {
+              const rawPath = String(item?.path || "").trim();
+              const baseFromPath =
+                rawPath.split(/[/\\]/).pop() || "";
+              const rawName = String(item?.name || baseFromPath || "").trim();
+              if (!rawName) return null;
+              const fileName = rawName.endsWith(".json")
+                ? rawName
+                : `${rawName}.json`;
+              const matchKey = fileName.replace(/\.json$/i, "");
+              const value = rawPath || fileName;
+              return {
+                label: fileName,
+                value,
+                matchKey,
+              };
+            })
+            .filter((item: GlossaryOption | null) => item && item.value)
+            .map((item: GlossaryOption | null) => item as GlossaryOption);
+          setRemoteGlossaries(mapped);
+        } else {
+          setRemoteGlossaries([]);
+        }
+      } catch (e) {
+        setRemoteGlossaries([]);
+      }
+    };
+
     // Sync Model on Active - 每次进入页面时主动获取模型信息
     useEffect(() => {
       if (!active) return;
       fetchData();
       if (isRemoteMode) {
         fetchRemoteModels();
+        fetchRemoteGlossaries();
       }
       setPromptPreset(localStorage.getItem("config_preset") || "novel");
       if (isRemoteMode) {
@@ -251,7 +312,6 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         setModelPath("");
       }
     }, [active, isRemoteMode]);
-    const [glossaries, setGlossaries] = useState<string[]>([]);
 
     // Save Options
     const [saveCot, setSaveCot] = useState(
@@ -439,13 +499,21 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         const savedRemote = localStorage.getItem("config_remote_model");
         if (savedRemote) setRemoteModelPath(savedRemote);
         fetchRemoteModels();
+        fetchRemoteGlossaries();
+        setGlossaryPath("");
+        glossarySelectionEphemeralRef.current = false;
       } else {
         const savedModel = localStorage.getItem("config_model");
         if (savedModel) setModelPath(savedModel);
+        const savedGlossary = localStorage.getItem("config_glossary_path") || "";
+        setGlossaryPath(savedGlossary);
+        glossarySelectionEphemeralRef.current = false;
       }
-      const savedGlossary = localStorage.getItem("config_glossary_path");
-      if (savedGlossary) setGlossaryPath(savedGlossary);
       fetchData();
+    }, [isRemoteMode]);
+
+    useEffect(() => {
+      isRemoteModeRef.current = isRemoteMode;
     }, [isRemoteMode]);
 
     useEffect(() => {
@@ -615,6 +683,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         // Interrupted or index out of range
         setCurrentQueueIndex(-1);
       }
+      resetEphemeralGlossarySelection();
     }, []); // Empty deps - uses refs for values
 
     useEffect(() => {
@@ -1163,6 +1232,15 @@ export const Dashboard = forwardRef<any, DashboardProps>(
       [isReordering],
     );
 
+    const resetEphemeralGlossarySelection = () => {
+      if (!glossarySelectionEphemeralRef.current) return;
+      glossarySelectionEphemeralRef.current = false;
+      const globalGlossary = isRemoteModeRef.current
+        ? ""
+        : localStorage.getItem("config_glossary_path") || "";
+      setGlossaryPath(globalGlossary);
+    };
+
     const startTranslation = (
       inputPath: string,
       forceResume?: boolean,
@@ -1377,7 +1455,9 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         ),
         remoteUrl: pickCustom(
           (customConfig as any).remoteUrl,
-          localStorage.getItem("config_remote_url") || "",
+          remoteRuntime?.runtime?.session?.url ||
+          localStorage.getItem("config_remote_url") ||
+          "",
         ),
         apiKey: pickCustom(
           (customConfig as any).apiKey,
@@ -1436,6 +1516,7 @@ export const Dashboard = forwardRef<any, DashboardProps>(
             : localStorage.getItem("config_save_cot") === "true",
         modelPath: effectiveModelPath,
         remoteModel: isRemoteMode ? effectiveModelPath : undefined,
+        executionMode: isRemoteMode ? "remote" : "local",
       };
 
       // Create history record
@@ -1539,16 +1620,15 @@ export const Dashboard = forwardRef<any, DashboardProps>(
         ?.split(".")
         .slice(0, -1)
         .join(".");
-      if (inputName && glossaries.length > 0) {
-        const match = glossaries.find(
-          (g) => g.split(".").slice(0, -1).join(".") === inputName,
-        );
-        if (match && match !== glossaryPath) {
-          matchedGlossary = match;
-          setGlossaryPath(match);
+      if (inputName && activeGlossaries.length > 0) {
+        const match = activeGlossaries.find((g) => g.matchKey === inputName);
+        if (match && match.value !== glossaryPath) {
+          matchedGlossary = match.value;
+          setGlossaryPath(match.value);
+          glossarySelectionEphemeralRef.current = true;
           window.api?.showNotification(
             t.glossaryView.autoMatchTitle,
-            (t.glossaryView.autoMatchMsg || "").replace("{name}", match),
+            (t.glossaryView.autoMatchMsg || "").replace("{name}", match.label),
           );
         }
       }
@@ -1581,17 +1661,20 @@ export const Dashboard = forwardRef<any, DashboardProps>(
             index < queue.length - 1
               ? () => {
                 setConfirmModal(null);
+                resetEphemeralGlossarySelection();
                 checkAndStart(queue[index + 1].path, index + 1);
               }
               : undefined,
           onStopAll: () => {
             setConfirmModal(null);
+            resetEphemeralGlossarySelection();
             handleStop();
           },
           onCancel: () => {
             setConfirmModal(null);
             setIsRunning(false);
             setCurrentQueueIndex(-1);
+            resetEphemeralGlossarySelection();
           },
         });
       } else {
@@ -2225,12 +2308,19 @@ export const Dashboard = forwardRef<any, DashboardProps>(
                   <select
                     className="w-full bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer truncate -ml-0.5"
                     value={glossaryPath}
-                    onChange={(e) => setGlossaryPath(e.target.value)}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setGlossaryPath(nextValue);
+                      const globalGlossary = isRemoteMode
+                        ? ""
+                        : localStorage.getItem("config_glossary_path") || "";
+                      glossarySelectionEphemeralRef.current = nextValue !== globalGlossary;
+                    }}
                   >
                     <option value="">{t.none}</option>
-                    {glossaries.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
+                    {activeGlossaries.map((g) => (
+                      <option key={`${g.label}-${g.value}`} value={g.value}>
+                        {g.label}
                       </option>
                     ))}
                   </select>
